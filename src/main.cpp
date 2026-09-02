@@ -153,10 +153,11 @@ static void wireUiHooks() {
         samplingPaused = false;
     };
     ui::onStop = [] { samplingPaused = true; };
-    ui::onSetClickThreshold = [](float d) {
+    ui::onAdjustClickThreshold = [](int delta) {
         xSemaphoreTake(trackerMux, portMAX_DELAY);
-        tracker.setClickThresholdDegrees(d);
+        tracker.setClickThresholdDegrees(tracker.clickThresholdDegrees() + delta);
         xSemaphoreGive(trackerMux);
+        clicker.playClick();  // audible feedback on the - / + touch
     };
 }
 

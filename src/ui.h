@@ -23,9 +23,9 @@ void init();
 void render(const Snapshot& s);
 
 // Raised by the view; wired to the tracker in main.
-extern std::function<void()> onTap;                  // screen tapped (start calibration)
+extern std::function<void()> onTap;                    // screen tapped (start calibration)
 extern std::function<void()> onRecal;
 extern std::function<void()> onStop;
-extern std::function<void(float)> onSetClickThreshold;
+extern std::function<void(int)> onAdjustClickThreshold;  // -1 / +1 from the bottom buttons
 
 }  // namespace ui
