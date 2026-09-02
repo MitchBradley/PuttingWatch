@@ -5,9 +5,10 @@ watch devkit. A C++/PlatformIO port of the `PuttingCoachWatch` watchOS app
 (itself the wrist-worn subset of the `PuttingCoach` iOS project).
 
 The device is mounted on the putter. You tap to calibrate a rest orientation,
-then it gives a **click** (a short haptic pulse) each time the backswing
-passes a new angular threshold. Clicking stops on the reversal into the
-forward stroke and re-arms once the putter settles back near address.
+then it gives an audible **click** (a short tone through the onboard speaker)
+each time the backswing passes a new angular threshold. Clicking stops on the
+reversal into the forward stroke and re-arms once the putter settles back
+near address.
 
 This first port covers the *watch subset only*: calibration + backswing/click
 detection. Impact detection and face-angle-at-impact (from the phone app) are
@@ -19,7 +20,8 @@ future work — see `~/.claude/plans/shimmying-finding-whale.md`.
 |---|---|---|
 | `lib/PuttingCore/` | `SwingTracker` (the Model — all swing logic), `GravityFilter`, `MotionSample`, `Vec3`. No Arduino deps. | ✅ host unit tests |
 | `lib/Imu/` | QMI8658 driver wrapper (lewisxhe/SensorLib) | ⏳ needs board |
-| `lib/Clicker/` | Feedback renderer — pulses GPIO18; ES8311 audio path is a TODO | ⏳ needs board |
+| `lib/Clicker/` | Feedback renderer — ES8311 codec + speaker over I2S, playback on its own task | 🔨 compiles; runtime needs board |
+| `lib/Es8311/` | Vendored ES8311 codec driver (Espressif/Waveshare) | — |
 | `src/ui.*` | LVGL 9 view: state-mapped screens, background tint, click-interval slider | 🔨 compiles; runtime needs board |
 | `src/main.cpp` | Board bring-up + wiring; 100 Hz sampling task on core 1, LVGL on core 0 | 🔨 compiles; runtime needs board |
 | `lib/Arduino_DriveBus/` | Vendored Waveshare FT3168 touch driver (not on the PlatformIO registry) | — |
@@ -62,7 +64,8 @@ pio run -e esp32s3 -t upload -t monitor
 3. Tap → "Hold still…" (yellow) for ~2 s → rest x/y/z shown → live angle
    screen.
 4. Hold the board level, then tilt it about one axis: the angle number
-   tracks, and a click (GPIO18 pulse) fires every `click:` degrees.
+   tracks, and an audible click fires every `click:` degrees. (Two short
+   tones also play when calibration completes.)
 5. Tilt past ~a few degrees then bring it back: clicks stop after the
    reversal; background tint drops from green; it re-arms after ~2 s held
    still near the calibrated rest.
@@ -71,9 +74,10 @@ pio run -e esp32s3 -t upload -t monitor
 
 ### Known open items
 
-- **GPIO18 feedback pin** — the community board template labels it a haptic
-  motor; the Waveshare spec sheet does not list one. If nothing is felt,
-  wire up the ES8311 audio path in `lib/Clicker/Clicker.cpp`.
+- **Audio** — ES8311 codec + NS4150B amp (PA enable GPIO46), 16 kHz mono
+  tones, playback on a dedicated FreeRTOS task. If the codec doesn't come up
+  the firmware logs "audio disabled" and runs silently. Volume, tone pitch,
+  and durations are constants at the top of `lib/Clicker/Clicker.{h,cpp}`.
 - **`GravityFilter` blend** and the `SwingTracker` constants are ported from
   the Swift app as starting points; expect to re-tune them on-device against
   real putter-mounted strokes.

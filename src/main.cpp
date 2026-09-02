@@ -9,7 +9,7 @@
 // Layers:
 //   lib/PuttingCore  - SwingTracker (Model) + GravityFilter, pure C++, unit-tested
 //   lib/Imu          - QMI8658 driver wrapper
-//   lib/Clicker      - feedback renderer (GPIO18 pulse; ES8311 audio TODO)
+//   lib/Clicker      - feedback renderer (ES8311 codec + speaker, own task)
 //   src/ui.*         - LVGL view
 //
 // STATUS: pure logic (lib/PuttingCore) is host-tested; everything in this file
@@ -201,7 +201,7 @@ void setup() {
     ui::init();
     wireUiHooks();
 
-    clicker.begin();
+    if (!clicker.begin()) USBSerial.println("Clicker/ES8311 init failed - audio disabled");
 
     // --- Model callbacks (run inside tracker.update, already under the mutex -
     // just raise a flag, do the I/O from loop()). ---
