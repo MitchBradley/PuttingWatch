@@ -245,8 +245,9 @@ static void wireUiHooks() {
     ui::onAdjustClickThreshold = [](int delta) {
         xSemaphoreTake(trackerMux, portMAX_DELAY);
         tracker.setClickThresholdDegrees(tracker.clickThresholdDegrees() + delta);
+        int nv = (int)lroundf(tracker.clickThresholdDegrees());  // clamped value
         xSemaphoreGive(trackerMux);
-        clicker.playTick();  // lower-pitched than the motion click
+        clicker.playNumber(nv);  // speaks "four".."twelve"; tone fallback if no samples
     };
 }
 

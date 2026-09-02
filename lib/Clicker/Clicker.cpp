@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <math.h>
 #include "pin_config.h"
+#include "numbers_audio.h"
 
 extern "C" {
 #include "es8311.h"
@@ -60,7 +61,7 @@ bool Clicker::begin() {
         return false;
     }
 
-    es_ = bringUpCodec(kSampleRate, /*volume 0-100*/ 80);
+    es_ = bringUpCodec(kSampleRate, /*volume 0-100*/ 70);
     if (!es_) {
         i2s.end();
         return false;
@@ -72,7 +73,8 @@ bool Clicker::begin() {
     clickBuf_ = (int16_t*)malloc(clickFrames_ * 2 * sizeof(int16_t));
     tickBuf_ = (int16_t*)malloc(tickFrames_ * 2 * sizeof(int16_t));
     beepBuf_ = (int16_t*)malloc(beepFrames_ * 2 * sizeof(int16_t));
-    if (!clickBuf_ || !tickBuf_ || !beepBuf_) return false;
+    stereoScratch_ = (int16_t*)malloc(kStereoChunkFrames * 2 * sizeof(int16_t));
+    if (!clickBuf_ || !tickBuf_ || !beepBuf_ || !stereoScratch_) return false;
 
     const int ramp = kSampleRate * 2 / 1000;  // 2 ms
     renderTone(clickBuf_, clickFrames_, kClickHz, 0.6f, ramp);
@@ -106,6 +108,17 @@ void Clicker::playBeep(int n) {
     for (int i = 0; i < n; i++) xQueueSend(queue_, &k, 0);
 }
 
+void Clicker::playNumber(int n) {
+    if (!ok_) return;
+    if (n < 1 || n >= kNumberSamplesCount || kNumberSamples[n].frames == 0) {
+        playTick();  // no sample compiled in - fall back to the tone
+        return;
+    }
+    xQueueReset(queue_);  // rapid +/- : speak only the final value
+    uint8_t k = kNumberQueueBase + (uint8_t)n;
+    xQueueSend(queue_, &k, 0);
+}
+
 void Clicker::audioTask() {
     uint8_t item;
     for (;;) {
@@ -114,6 +127,18 @@ void Clicker::audioTask() {
             i2s.write((uint8_t*)clickBuf_, clickFrames_ * 2 * sizeof(int16_t));
         } else if (item == 2) {
             i2s.write((uint8_t*)tickBuf_, tickFrames_ * 2 * sizeof(int16_t));
+        } else if (item >= kNumberQueueBase + 1) {
+            // Spoken number: stream the mono sample out as stereo in chunks.
+            int n = item - kNumberQueueBase;
+            if (n >= kNumberSamplesCount) continue;
+            const NumberSample& s = kNumberSamples[n];
+            for (int off = 0; off < s.frames; off += kStereoChunkFrames) {
+                int n = s.frames - off;
+                if (n > kStereoChunkFrames) n = kStereoChunkFrames;
+                for (int i = 0; i < n; i++)
+                    stereoScratch_[2 * i] = stereoScratch_[2 * i + 1] = s.data[off + i];
+                i2s.write((uint8_t*)stereoScratch_, n * 2 * sizeof(int16_t));
+            }
         } else {
             i2s.write((uint8_t*)beepBuf_, beepFrames_ * 2 * sizeof(int16_t));
             vTaskDelay(pdMS_TO_TICKS(60));  // gap between calibration beeps

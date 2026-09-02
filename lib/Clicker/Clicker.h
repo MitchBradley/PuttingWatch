@@ -20,6 +20,7 @@ class Clicker {
     void playClick();      // motion click - short, high
     void playTick();       // UI button confirm - short, lower pitch than the click
     void playBeep(int n);  // n longer tones - calibration cue
+    void playNumber(int n);  // spoken number (whatever's compiled in); tone fallback
 
     void tick() {}  // kept for API compatibility; playback is task-driven now
 
@@ -45,5 +46,13 @@ class Clicker {
     int tickFrames_ = 0;
     int beepFrames_ = 0;
 
-    QueueHandle_t queue_ = nullptr;  // of uint8_t: 0 = click, 1 = beep, 2 = tick
+    // Scratch for streaming a mono number sample out as stereo.
+    static constexpr int kStereoChunkFrames = 256;
+    int16_t* stereoScratch_ = nullptr;
+
+    // uint8_t queue: 0 = click, 1 = beep, 2 = tick; a spoken number n is
+    // queued as kNumberQueueBase + n (numbers can be 1/2, which would
+    // otherwise collide with the tone codes).
+    static constexpr uint8_t kNumberQueueBase = 100;
+    QueueHandle_t queue_ = nullptr;
 };

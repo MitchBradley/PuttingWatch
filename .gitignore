@@ -3,3 +3,8 @@
 compile_commands.json
 .DS_Store
 *.orig
+
+# Piper TTS voice models + scratch (regenerate assets/*.wav locally)
+*.onnx
+*.onnx.json
+/output.wav

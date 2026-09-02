@@ -27,6 +27,8 @@ future work — see `~/.claude/plans/shimmying-finding-whale.md`.
 | `src/main.cpp` | Board bring-up + wiring; 100 Hz sampling task on core 1, LVGL on core 0 | 🔨 compiles; runtime needs board |
 | `assets/Honu.png` | Waiting-screen image, original art | — |
 | `src/assets/Honu.c` | GIMP RGB565 C-source export of the above, compiled directly; carries a small documented wrapper (`lv_image_dsc_t honu_img`, ~305 KB flash, no runtime conversion). `src/honu_img.h` declares it. | — |
+| `assets/{four..twelve}.wav` | Piper-synthesised spoken click-interval values (female voice). | — |
+| `src/assets/numbers_audio.c` | Generated from the WAVs by `tools/wav2c_numbers.py` (16 kHz mono 16-bit, trimmed/normalised, ~124 KB flash). `Clicker::playNumber()` speaks the value on `−`/`+`. Regenerate after editing the WAVs. | — |
 | `lib/Arduino_DriveBus/` | Vendored Waveshare FT3168 touch driver (not on the PlatformIO registry) | — |
 | `include/pin_config.h` | Full board pin map | — |
 | `include/lv_conf.h` | LVGL 9.3 config (from Waveshare's examples, demos off) | — |
@@ -73,8 +75,9 @@ pio run -e esp32s3 -t upload -t monitor
 5. Tilt past ~a few degrees then bring it back: clicks stop after the
    reversal; background tint drops from green; it re-arms after ~2 s held
    still near the calibrated rest.
-6. `−` / `+` change click spacing (2–12°), each with a click. "Recal"
-   restarts calibration.
+6. `−` / `+` change click spacing (2–12°) and speak the new value ("four"…
+   "twelve"); rapid presses speak only the final value. "Recal" restarts
+   calibration.
 7. **Sleep:** a tap on empty screen area (not a button) → *light sleep*
    (~1–2 mA, display + amp off); touch the screen or press BOOT to wake and
    resume exactly where it was. **"Stop" → *deep sleep*** (~10 µA, RAM lost);
