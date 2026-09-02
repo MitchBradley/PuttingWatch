@@ -69,8 +69,14 @@ pio run -e esp32s3 -t upload -t monitor
 5. Tilt past ~a few degrees then bring it back: clicks stop after the
    reversal; background tint drops from green; it re-arms after ~2 s held
    still near the calibrated rest.
-6. Drag the slider — click spacing changes (2–12°). "Recal" restarts
-   calibration; "Stop" pauses sampling.
+6. `−` / `+` change click spacing (2–12°), each with a click. "Recal"
+   restarts calibration.
+7. **Sleep:** a tap on empty screen area (not a button) → *light sleep*
+   (~1–2 mA, display + amp off); touch the screen or press BOOT to wake and
+   resume exactly where it was. **"Stop" → *deep sleep*** (~10 µA, RAM lost);
+   only the BOOT button wakes it, via a full reboot to the tap-to-start
+   screen. (BOOT is also the download-mode strap — a quick press wakes; don't
+   hold it.)
 
 ### Known open items
 

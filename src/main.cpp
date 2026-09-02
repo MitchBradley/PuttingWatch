@@ -18,6 +18,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <esp_heap_caps.h>
+#include <esp_sleep.h>
+#include <driver/gpio.h>
+#include <driver/rtc_io.h>
 #include <lvgl.h>
 #include "Arduino_GFX_Library.h"
 #include "Arduino_DriveBus_Library.h"
@@ -63,7 +66,10 @@ static Clicker clicker;
 static SemaphoreHandle_t trackerMux;        // guards all `tracker` access
 static volatile bool clickPending = false;
 static volatile bool calibratedCuePending = false;
-static volatile bool samplingPaused = false;
+static volatile bool samplingPaused = false;    // true while asleep (or stopping)
+static volatile bool lightSleepReq = false;     // set by a tap on empty screen area
+static volatile bool deepSleepReq = false;      // set by the Stop button
+static uint32_t touchIgnoreUntilMs = 0;         // swallow the light-sleep wake tap
 
 // LVGL draw buffer (partial mode). 100 lines so the tallest dynamic element
 // (the montserrat-48 angle label, a fixed 70 px box - see ui.cpp) always
@@ -88,7 +94,7 @@ static void dispFlush(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map
 static void touchRead(lv_indev_t*, lv_indev_data_t* data) {
     // Called every lv_timer_handler pass - do zero I2C traffic unless the
     // touch IRQ actually fired.
-    if (!touch->IIC_Interrupt_Flag) {
+    if (!touch->IIC_Interrupt_Flag || (int32_t)(millis() - touchIgnoreUntilMs) < 0) {
         data->state = LV_INDEV_STATE_RELEASED;
         return;
     }
@@ -114,6 +120,7 @@ static void samplingTask(void*) {
         vTaskDelayUntil(&last, period);
         if (samplingPaused) {
             prevMs = millis();
+            last = xTaskGetTickCount();  // keep the delay baseline fresh across a sleep
             continue;
         }
 
@@ -140,11 +147,84 @@ static void samplingTask(void*) {
 }
 
 // ---------------------------------------------------------------------------
+// Tap on empty screen area -> light sleep. Display off, amp off, both cores
+// halted; a screen touch (FT3168 INT low) or the BOOT button wakes it and it
+// resumes exactly where it left off - RAM is retained through light sleep, so
+// SwingTracker state survives.
+static void enterLightSleep() {
+    USBSerial.println("light sleep (touch screen to wake)");
+    samplingPaused = true;
+
+    // Wait for the Stop touch to lift and drain the FT3168 so its INT line
+    // deasserts - a level-triggered wake armed while INT is already low
+    // returns from sleep immediately.
+    uint32_t t0 = millis();
+    while (digitalRead(TP_INT) == LOW && millis() - t0 < 3000) {
+        touch->IIC_Read_Device_Value(
+            touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
+        delay(25);
+    }
+
+    USBSerial.flush();
+    delay(20);  // let the last serial bytes out before USB-CDC powers down
+    gfx->displayOff();
+    digitalWrite(PA_CTRL, LOW);
+
+    esp_sleep_enable_gpio_wakeup();
+    gpio_wakeup_enable((gpio_num_t)TP_INT, GPIO_INTR_LOW_LEVEL);
+    gpio_wakeup_enable((gpio_num_t)BTN_BOOT, GPIO_INTR_LOW_LEVEL);
+    esp_light_sleep_start();
+    // ---------------- resumes here on wake ----------------
+    gpio_wakeup_disable((gpio_num_t)TP_INT);
+    gpio_wakeup_disable((gpio_num_t)BTN_BOOT);
+
+    gfx->displayOn();
+    gfx->fillScreen(BLACK);
+    digitalWrite(PA_CTRL, HIGH);
+    lv_obj_invalidate(lv_screen_active());  // full repaint
+
+    touch->IIC_Interrupt_Flag = false;
+    touchIgnoreUntilMs = millis() + 400;  // don't let the wake tap hit a button
+    samplingPaused = false;
+    USBSerial.println("woke from light sleep");
+}
+
+// ---------------------------------------------------------------------------
+// Stop button -> deep sleep: everything off (~10 uA), RAM lost. Wakes only on
+// the BOOT button (GPIO0) and comes back through a full reboot / setup(), so
+// it lands on the "Tap when in putting position" screen. The FT3168 touch INT
+// (GPIO38) is NOT an RTC pad and can't wake deep sleep, hence BOOT only.
+static void enterDeepSleep() {
+    USBSerial.println("stop: deep sleep (press BOOT to wake)");
+    USBSerial.flush();
+    delay(20);
+    samplingPaused = true;
+    gfx->displayOff();
+
+    // Latch the amp-enable low through deep sleep (GPIO46 is not an RTC pad,
+    // so without this it floats once the SoC powers down). S3 can hold
+    // digital pads across deep sleep via gpio_deep_sleep_hold_en().
+    digitalWrite(PA_CTRL, LOW);
+    gpio_hold_en((gpio_num_t)PA_CTRL);
+    gpio_deep_sleep_hold_en();
+
+    rtc_gpio_pullup_en((gpio_num_t)BTN_BOOT);
+    rtc_gpio_pulldown_dis((gpio_num_t)BTN_BOOT);
+    esp_sleep_enable_ext1_wakeup(1ULL << BTN_BOOT, ESP_EXT1_WAKEUP_ANY_LOW);
+    esp_deep_sleep_start();  // never returns
+}
+
+// ---------------------------------------------------------------------------
 static void wireUiHooks() {
+    // A tap that isn't on a button: start calibration from the idle screen,
+    // otherwise drop into light sleep.
     ui::onTap = [] {
         xSemaphoreTake(trackerMux, portMAX_DELAY);
-        tracker.tap();
+        SwingTracker::State st = tracker.state();
+        if (st == SwingTracker::State::WaitingForCalibration) tracker.tap();
         xSemaphoreGive(trackerMux);
+        if (st == SwingTracker::State::Monitoring || st == SwingTracker::State::Done)
+            lightSleepReq = true;
     };
     ui::onRecal = [] {
         xSemaphoreTake(trackerMux, portMAX_DELAY);
@@ -152,7 +232,7 @@ static void wireUiHooks() {
         xSemaphoreGive(trackerMux);
         samplingPaused = false;
     };
-    ui::onStop = [] { samplingPaused = true; };
+    ui::onStop = [] { deepSleepReq = true; };
     ui::onAdjustClickThreshold = [](int delta) {
         xSemaphoreTake(trackerMux, portMAX_DELAY);
         tracker.setClickThresholdDegrees(tracker.clickThresholdDegrees() + delta);
@@ -170,12 +250,19 @@ void setup() {
     USBSerial.setTxTimeoutMs(0);
     USBSerial.println("\nPuttingWatch booting");
 
+    // Release any pad holds left latched by a prior deep sleep (see
+    // enterDeepSleep) before anything reconfigures those pins.
+    gpio_hold_dis((gpio_num_t)PA_CTRL);
+    gpio_deep_sleep_hold_dis();
+
     trackerMux = xSemaphoreCreateMutex();
 
     if (!gfx->begin()) USBSerial.println("gfx->begin() failed");
     gfx->fillScreen(BLACK);
 
     Wire.begin(IIC_SDA, IIC_SCL, 400000);
+
+    pinMode(BTN_BOOT, INPUT_PULLUP);  // also a wake source out of light sleep
 
     if (!touch->begin()) USBSerial.println("FT3168 begin failed");
     bool imuOk = imu.begin(Wire, IMU_I2C_ADDR);
@@ -215,6 +302,12 @@ void setup() {
 }
 
 void loop() {
+    if (deepSleepReq) enterDeepSleep();  // never returns
+    if (lightSleepReq) {
+        lightSleepReq = false;
+        enterLightSleep();
+    }
+
     lv_timer_handler();
 
     if (clickPending) { clickPending = false; clicker.playClick(); }
