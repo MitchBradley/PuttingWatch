@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include "pin_config.h"
+#include "app_config.h"
 #include "honu_img.h"
 
 namespace ui {
@@ -16,8 +17,9 @@ std::function<void(int)> onAdjustClickThreshold;
 namespace {
 
 lv_obj_t* root = nullptr;
-lv_obj_t* honuImg = nullptr;     // waiting-screen background image
-lv_obj_t* waitLabel = nullptr;   // "Tap ..." text, black, above the image
+lv_obj_t* honuImg = nullptr;        // waiting screen ("Tap ...")
+lv_obj_t* honuBottomImg = nullptr;  // "Hold still ..." screen
+lv_obj_t* waitLabel = nullptr;      // black text above the image, both screens
 lv_obj_t* statusLabel = nullptr;
 lv_obj_t* bigLabel = nullptr;   // swing angle in Monitoring, rest xyz in Done
 lv_obj_t* threshLabel = nullptr;
@@ -92,6 +94,11 @@ void init() {
     lv_image_set_src(honuImg, &honu_img);  // 410x380
     lv_obj_align(honuImg, LV_ALIGN_BOTTOM_MID, 0, 0);
 
+    honuBottomImg = lv_image_create(root);
+    lv_image_set_src(honuBottomImg, &honu_bottom_img);
+    lv_obj_align(honuBottomImg, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_flag(honuBottomImg, LV_OBJ_FLAG_HIDDEN);  // first render picks the image
+
     waitLabel = lv_label_create(root);
     lv_obj_set_style_text_font(waitLabel, &lv_font_montserrat_32, 0);
     lv_obj_set_style_text_color(waitLabel, lv_color_black(), 0);
@@ -124,11 +131,14 @@ void init() {
     lv_obj_set_style_text_align(battLabel, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_align_to(battLabel, battBar, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
 
-    // Click-interval - / + across the BOTTOM (no slider).
+    // Click-interval - / + across the BOTTOM (no slider). Start hidden so an
+    // early touch (before the first render sets visibility) can't click them.
     minusBtn = makeButton("-", minusClicked, LV_ALIGN_BOTTOM_MID, -88, -16, 140, 104,
                           &lv_font_montserrat_48);
     plusBtn = makeButton("+", plusClicked, LV_ALIGN_BOTTOM_MID, 88, -16, 140, 104,
                          &lv_font_montserrat_48);
+    lv_obj_add_flag(minusBtn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(plusBtn, LV_OBJ_FLAG_HIDDEN);
 
     // Every dynamic label gets a FIXED box (full width, fixed height, fixed
     // position) with the text centred inside it - see the note in render():
@@ -182,7 +192,8 @@ void render(const Snapshot& s) {
     char thresh[48] = "";
     uint32_t bg = kBgIdleDark;
     bool showBig = false, showThresh = false, showTopBtns = false, showNudge = false;
-    bool showWait = false;
+    bool showWait = false;    // image + top-band text layout
+    bool showBottom = false;  // which image: false = Honu (tap), true = HonuBottom (hold still)
 
     switch (s.state) {
         case State::WaitingForCalibration:
@@ -193,19 +204,28 @@ void render(const Snapshot& s) {
             break;
 
         case State::Accumulating:
-            // Same image + top-band layout as the waiting screen, just a
-            // yellow background instead of white.
+            // Same top-band layout as the waiting screen, yellow background,
+            // the HonuBottom image.
             bg = kBgAccum;
             snprintf(wait, sizeof(wait), "Hold still...");
-            showWait = true;
+            showWait = showBottom = true;
             break;
 
         case State::Done:
+#if SHOW_REST_CAPTURED_SCREEN
+            // Debug screen: averaged rest-gravity vector, held for
+            // SwingTracker::Config::monitoringDelayMs before Monitoring.
             bg = kBgIdleDark;
             snprintf(status, sizeof(status), "Rest captured");
             snprintf(big, sizeof(big), "%+.2f %+.2f %+.2f", s.restG[0], s.restG[1], s.restG[2]);
             showBig = showTopBtns = true;
             break;
+#else
+            // Screen compiled out for production. Done is a single-tick
+            // pass-through to Monitoring (monitoringDelayMs == 0), so render it
+            // as Monitoring in case the view samples state during that tick.
+            [[fallthrough]];
+#endif
 
         case State::Monitoring:
             bg = s.ready ? kBgReady : kBgIdleDark;
@@ -253,10 +273,11 @@ void render(const Snapshot& s) {
     }
 
     int vis = (showBig ? 1 : 0) | (showThresh ? 2 : 0) | (showTopBtns ? 4 : 0) |
-              (showNudge ? 8 : 0) | (showWait ? 16 : 0);
+              (showNudge ? 8 : 0) | (showWait ? 16 : 0) | (showBottom ? 32 : 0);
     if (vis != lastVis) {
         lastVis = vis;
-        setHidden(honuImg, !showWait);
+        setHidden(honuImg, !showWait || showBottom);
+        setHidden(honuBottomImg, !showWait || !showBottom);
         setHidden(waitLabel, !showWait);
         setHidden(statusLabel, showWait);
         setHidden(bigLabel, !showBig);

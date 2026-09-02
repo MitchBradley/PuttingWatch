@@ -26,7 +26,7 @@ future work — see `~/.claude/plans/shimmying-finding-whale.md`.
 | `src/ui.*` | LVGL 9 view: state-mapped screens, background tint, click-interval slider | 🔨 compiles; runtime needs board |
 | `src/main.cpp` | Board bring-up + wiring; 100 Hz sampling task on core 1, LVGL on core 0 | 🔨 compiles; runtime needs board |
 | `assets/Honu.png` | Waiting-screen image, original art | — |
-| `src/assets/Honu.c` | GIMP RGB565 C-source export of the above, compiled directly; carries a small documented wrapper (`lv_image_dsc_t honu_img`, ~305 KB flash, no runtime conversion). `src/honu_img.h` declares it. | — |
+| `src/assets/Honu.c`, `src/assets/HonuBottom.c` | GIMP RGB565 C-source exports, compiled directly, each with a small documented wrapper (`honu_img` = waiting screen, `honu_bottom_img` = "Hold still" screen; ~305 KB flash each, no runtime conversion). `src/honu_img.h` declares both. | — |
 | `assets/{four..twelve}.wav` | Piper-synthesised spoken click-interval values (female voice). | — |
 | `src/assets/numbers_audio.c` | Generated from the WAVs by `tools/wav2c_numbers.py` (16 kHz mono 16-bit, trimmed/normalised, ~124 KB flash). `Clicker::playNumber()` speaks the value on `−`/`+`. Regenerate after editing the WAVs. | — |
 | `lib/Arduino_DriveBus/` | Vendored Waveshare FT3168 touch driver (not on the PlatformIO registry) | — |

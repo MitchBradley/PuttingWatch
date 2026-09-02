@@ -28,6 +28,7 @@
 #include "HWCDC.h"
 
 #include "pin_config.h"
+#include "app_config.h"
 #include "GravityFilter.h"
 #include "SwingTracker.h"
 #include "MotionSample.h"
@@ -66,7 +67,18 @@ static void touchIsr() { touch->IIC_Interrupt_Flag = true; }
 // ---------------------------------------------------------------------------
 static Imu imu;
 static GravityFilter gravityFilter;
-static SwingTracker tracker;
+
+// Default model config, except: unless the "Rest captured" debug screen is
+// built in, collapse the post-calibration Done dwell to zero so calibration
+// hands straight off to Monitoring (see include/app_config.h).
+static SwingTracker::Config makeTrackerConfig() {
+    SwingTracker::Config c;
+#if !SHOW_REST_CAPTURED_SCREEN
+    c.monitoringDelayMs = 0;
+#endif
+    return c;
+}
+static SwingTracker tracker(makeTrackerConfig());
 static Clicker clicker;
 static Battery battery;
 static volatile int batteryPct = -1;  // updated from loop() every few seconds
@@ -74,7 +86,6 @@ static volatile int batteryMv = -1;
 
 static SemaphoreHandle_t trackerMux;        // guards all `tracker` access
 static volatile bool clickPending = false;
-static volatile bool calibratedCuePending = false;
 static volatile bool samplingPaused = false;    // true while asleep (or stopping)
 static volatile bool lightSleepReq = false;     // set by a tap on empty screen area
 static volatile bool deepSleepReq = false;      // set by the Stop button
@@ -243,11 +254,20 @@ static void wireUiHooks() {
     };
     ui::onStop = [] { deepSleepReq = true; };
     ui::onAdjustClickThreshold = [](int delta) {
+        // The click interval only has meaning on the monitoring screen, and
+        // its buttons are shown only there. Ignore a nudge in any other state
+        // so a stray touch (e.g. a touch-controller phantom right after a
+        // cold / deep-sleep boot, which was landing on "+") can't change the
+        // value or speak it.
         xSemaphoreTake(trackerMux, portMAX_DELAY);
-        tracker.setClickThresholdDegrees(tracker.clickThresholdDegrees() + delta);
-        int nv = (int)lroundf(tracker.clickThresholdDegrees());  // clamped value
+        bool adjust = tracker.state() == SwingTracker::State::Monitoring;
+        int nv = 0;
+        if (adjust) {
+            tracker.setClickThresholdDegrees(tracker.clickThresholdDegrees() + delta);
+            nv = (int)lroundf(tracker.clickThresholdDegrees());  // clamped value
+        }
         xSemaphoreGive(trackerMux);
-        clicker.playNumber(nv);  // speaks "four".."twelve"; tone fallback if no samples
+        if (adjust) clicker.playNumber(nv);  // "four".."twelve"; tone fallback if no samples
     };
 }
 
@@ -278,6 +298,13 @@ void setup() {
     pinMode(BTN_BOOT, INPUT_PULLUP);  // also a wake source out of light sleep
 
     if (!touch->begin()) USBSerial.println("FT3168 begin failed");
+    // The hardware reset in touch->begin() can leave the FT3168's INT
+    // asserted or a stale sample pending; swallow touches briefly so a
+    // phantom press on boot (notably after a deep-sleep wake) can't land on
+    // a button - this was hitting "+" and announcing "seven".
+    touch->IIC_Interrupt_Flag = false;
+    touchIgnoreUntilMs = millis() + 400;
+
     bool imuOk = imu.begin(Wire, IMU_I2C_ADDR);
     if (!imuOk) USBSerial.println("QMI8658 begin failed - check wiring/address");
     if (!battery.begin(Wire)) USBSerial.println("AXP2101 begin failed - no battery gauge");
@@ -308,7 +335,8 @@ void setup() {
     // --- Model callbacks (run inside tracker.update, already under the mutex -
     // just raise a flag, do the I/O from loop()). ---
     tracker.onClick = [] { clickPending = true; };
-    tracker.onCalibrationComplete = [] { calibratedCuePending = true; };
+    // No calibration-complete cue here: the click interval is spoken from
+    // loop() when the main (Monitoring) screen first appears - see below.
 
     xTaskCreatePinnedToCore(samplingTask, "sampling", 4096, nullptr, 2, nullptr, 0);
 
@@ -325,7 +353,6 @@ void loop() {
     lv_timer_handler();
 
     if (clickPending) { clickPending = false; clicker.playClick(); }
-    if (calibratedCuePending) { calibratedCuePending = false; clicker.playBeep(2); }
     clicker.tick();
 
     // Battery: poll the AXP2101 voltage every 5 s (and once on the first
@@ -364,6 +391,18 @@ void loop() {
             snap.batteryPct = batteryPct;
             snap.batteryMv = batteryMv;
             ui::render(snap);
+
+            // Cue for "calibration done, main screen is up": speak the current
+            // click interval (e.g. "seven") the first time we land on the
+            // Monitoring screen after calibration. Replaces the old
+            // double-beep, and holds the announcement back to this point
+            // rather than firing it right after the session starts.
+            static SwingTracker::State lastCueState = SwingTracker::State::WaitingForCalibration;
+            if (snap.state == SwingTracker::State::Monitoring &&
+                lastCueState != SwingTracker::State::Monitoring) {
+                clicker.playNumber((int)lroundf(snap.clickThresholdDeg));
+            }
+            lastCueState = snap.state;
         }
     }
 
