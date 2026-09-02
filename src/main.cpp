@@ -246,7 +246,7 @@ static void wireUiHooks() {
         xSemaphoreTake(trackerMux, portMAX_DELAY);
         tracker.setClickThresholdDegrees(tracker.clickThresholdDegrees() + delta);
         xSemaphoreGive(trackerMux);
-        clicker.playClick();  // audible feedback on the - / + touch
+        clicker.playTick();  // lower-pitched than the motion click
     };
 }
 

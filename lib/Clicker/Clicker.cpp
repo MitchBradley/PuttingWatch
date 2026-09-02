@@ -67,14 +67,17 @@ bool Clicker::begin() {
     }
 
     clickFrames_ = kSampleRate * kClickMs / 1000;
+    tickFrames_ = clickFrames_;
     beepFrames_ = kSampleRate * kBeepMs / 1000;
     clickBuf_ = (int16_t*)malloc(clickFrames_ * 2 * sizeof(int16_t));
+    tickBuf_ = (int16_t*)malloc(tickFrames_ * 2 * sizeof(int16_t));
     beepBuf_ = (int16_t*)malloc(beepFrames_ * 2 * sizeof(int16_t));
-    if (!clickBuf_ || !beepBuf_) return false;
+    if (!clickBuf_ || !tickBuf_ || !beepBuf_) return false;
 
     const int ramp = kSampleRate * 2 / 1000;  // 2 ms
-    renderTone(clickBuf_, clickFrames_, 2400.0f, 0.6f, ramp);
-    renderTone(beepBuf_, beepFrames_, 880.0f, 0.5f, ramp);
+    renderTone(clickBuf_, clickFrames_, kClickHz, 0.6f, ramp);
+    renderTone(tickBuf_, tickFrames_, kTickHz, 0.6f, ramp);
+    renderTone(beepBuf_, beepFrames_, kBeepHz, 0.5f, ramp);
 
     digitalWrite(PA_CTRL, HIGH);  // amp on, stays on
 
@@ -91,6 +94,12 @@ void Clicker::playClick() {
     xQueueSend(queue_, &k, 0);  // drop if the queue is backed up
 }
 
+void Clicker::playTick() {
+    if (!ok_) return;
+    uint8_t k = 2;
+    xQueueSend(queue_, &k, 0);
+}
+
 void Clicker::playBeep(int n) {
     if (!ok_) return;
     uint8_t k = 1;
@@ -103,6 +112,8 @@ void Clicker::audioTask() {
         if (xQueueReceive(queue_, &item, portMAX_DELAY) != pdTRUE) continue;
         if (item == 0) {
             i2s.write((uint8_t*)clickBuf_, clickFrames_ * 2 * sizeof(int16_t));
+        } else if (item == 2) {
+            i2s.write((uint8_t*)tickBuf_, tickFrames_ * 2 * sizeof(int16_t));
         } else {
             i2s.write((uint8_t*)beepBuf_, beepFrames_ * 2 * sizeof(int16_t));
             vTaskDelay(pdMS_TO_TICKS(60));  // gap between calibration beeps

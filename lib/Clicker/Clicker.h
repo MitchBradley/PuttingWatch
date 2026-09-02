@@ -17,7 +17,8 @@ class Clicker {
   public:
     bool begin();
 
-    void playClick();      // one short tick
+    void playClick();      // motion click - short, high
+    void playTick();       // UI button confirm - short, lower pitch than the click
     void playBeep(int n);  // n longer tones - calibration cue
 
     void tick() {}  // kept for API compatibility; playback is task-driven now
@@ -33,11 +34,16 @@ class Clicker {
     static constexpr int kSampleRate = 16000;
     static constexpr int kClickMs = 14;
     static constexpr int kBeepMs = 110;
+    static constexpr float kClickHz = 2400.0f;  // motion click
+    static constexpr float kTickHz = 1150.0f;   // UI button - ~1 octave lower
+    static constexpr float kBeepHz = 880.0f;    // calibration cue
 
     int16_t* clickBuf_ = nullptr;  // interleaved stereo
+    int16_t* tickBuf_ = nullptr;
     int16_t* beepBuf_ = nullptr;
     int clickFrames_ = 0;
+    int tickFrames_ = 0;
     int beepFrames_ = 0;
 
-    QueueHandle_t queue_ = nullptr;  // of uint8_t: 0 = click, 1 = beep
+    QueueHandle_t queue_ = nullptr;  // of uint8_t: 0 = click, 1 = beep, 2 = tick
 };
