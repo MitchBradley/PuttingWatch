@@ -25,6 +25,8 @@ future work — see `~/.claude/plans/shimmying-finding-whale.md`.
 | `lib/Battery/` | AXP2101 battery-percentage readout (XPowersLib) | 🔨 compiles; runtime needs board |
 | `src/ui.*` | LVGL 9 view: state-mapped screens, background tint, click-interval slider | 🔨 compiles; runtime needs board |
 | `src/main.cpp` | Board bring-up + wiring; 100 Hz sampling task on core 1, LVGL on core 0 | 🔨 compiles; runtime needs board |
+| `assets/Honu.png` | Waiting-screen image, original art | — |
+| `src/assets/Honu.c` | GIMP RGB565 C-source export of the above, compiled directly; carries a small documented wrapper (`lv_image_dsc_t honu_img`, ~305 KB flash, no runtime conversion). `src/honu_img.h` declares it. | — |
 | `lib/Arduino_DriveBus/` | Vendored Waveshare FT3168 touch driver (not on the PlatformIO registry) | — |
 | `include/pin_config.h` | Full board pin map | — |
 | `include/lv_conf.h` | LVGL 9.3 config (from Waveshare's examples, demos off) | — |
@@ -59,8 +61,8 @@ pio run -e esp32s3 -t upload -t monitor
 
 ## On-device bring-up checklist (first flash)
 
-1. Screen shows "Tap when in putting position" on a muted-olive background;
-   a finger touch registers.
+1. Screen shows the Honu image centred on white with "Tap when in putting
+   position" (black) in the band above it; a finger touch registers.
 2. Serial prints `state=… phase=… ready=… angle=… clicks=…` once a second.
 3. Tap → "Hold still…" (yellow) for ~2 s → rest x/y/z shown → live angle
    screen. A battery bar + percentage sits below the top buttons (shows

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include "pin_config.h"
+#include "honu_img.h"
 
 namespace ui {
 
@@ -15,6 +16,8 @@ std::function<void(int)> onAdjustClickThreshold;
 namespace {
 
 lv_obj_t* root = nullptr;
+lv_obj_t* honuImg = nullptr;     // waiting-screen background image
+lv_obj_t* waitLabel = nullptr;   // "Tap ..." text, black, above the image
 lv_obj_t* statusLabel = nullptr;
 lv_obj_t* bigLabel = nullptr;   // swing angle in Monitoring, rest xyz in Done
 lv_obj_t* threshLabel = nullptr;
@@ -26,7 +29,7 @@ lv_obj_t* minusBtn = nullptr;
 lv_obj_t* plusBtn = nullptr;
 
 // Background colours, matching ContentView.swift's palette intent.
-constexpr uint32_t kBgWaiting = 0x8C8026;   // muted olive
+constexpr uint32_t kBgWaiting = 0xFFFFFF;   // white - behind the Honu image
 constexpr uint32_t kBgAccum = 0xE6E600;     // bright yellow "hold still"
 constexpr uint32_t kBgIdleDark = 0x000000;  // black
 constexpr uint32_t kBgReady = 0x005A0D;     // clear green = armed
@@ -79,6 +82,22 @@ void init() {
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_add_flag(root, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(root, rootClicked, LV_EVENT_CLICKED, nullptr);
+
+    // Waiting screen: the Honu image centred vertically on white, with the
+    // prompt in the band above it. Shown only in WaitingForCalibration.
+    // Image flush to the bottom; the ~122 px of white it leaves is all at the
+    // top, and that's where the prompt goes (two explicit lines, kept well
+    // inside the rounded corners).
+    honuImg = lv_image_create(root);
+    lv_image_set_src(honuImg, &honu_img);  // 410x380
+    lv_obj_align(honuImg, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    waitLabel = lv_label_create(root);
+    lv_obj_set_style_text_font(waitLabel, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_color(waitLabel, lv_color_black(), 0);
+    lv_obj_set_width(waitLabel, LCD_WIDTH - 80);
+    lv_obj_set_style_text_align(waitLabel, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(waitLabel, LV_ALIGN_TOP_MID, 0, 18);
 
     // Recal / Stop across the TOP.
     recalBtn = makeButton("Recal", recalClicked, LV_ALIGN_TOP_MID, -88, 12, 150, 82,
@@ -144,6 +163,7 @@ void render(const Snapshot& s) {
     using State = SwingTracker::State;
 
     static char lastStatus[48] = "\x01";
+    static char lastWait[48] = "\x01";
     static char lastBig[48] = "\x01";
     static char lastThresh[48] = "\x01";
     static uint32_t lastBg = 0xFFFFFFFFu;
@@ -151,21 +171,27 @@ void render(const Snapshot& s) {
     static int lastBatt = -2;
 
     char status[48] = "";
+    char wait[48] = "";
     char big[48] = "";
     char thresh[48] = "";
     uint32_t bg = kBgIdleDark;
     bool showBig = false, showThresh = false, showTopBtns = false, showNudge = false;
+    bool showWait = false;
 
     switch (s.state) {
         case State::WaitingForCalibration:
             bg = kBgWaiting;
-            snprintf(status, sizeof(status), "%s",
-                     s.imuOk ? "Tap when in putting position" : "IMU not found - check wiring");
+            snprintf(wait, sizeof(wait), "%s",
+                     s.imuOk ? "Tap when in\nputting position" : "IMU not found\ncheck wiring");
+            showWait = true;
             break;
 
         case State::Accumulating:
+            // Same image + top-band layout as the waiting screen, just a
+            // yellow background instead of white.
             bg = kBgAccum;
-            snprintf(status, sizeof(status), "Hold still...");
+            snprintf(wait, sizeof(wait), "Hold still...");
+            showWait = true;
             break;
 
         case State::Done:
@@ -187,6 +213,10 @@ void render(const Snapshot& s) {
     if (strcmp(status, lastStatus)) {
         strcpy(lastStatus, status);
         lv_label_set_text(statusLabel, status);
+    }
+    if (strcmp(wait, lastWait)) {
+        strcpy(lastWait, wait);
+        lv_label_set_text(waitLabel, wait);
     }
     if (strcmp(big, lastBig)) {
         strcpy(lastBig, big);
@@ -212,9 +242,13 @@ void render(const Snapshot& s) {
         lv_label_set_text(battLabel, b);
     }
 
-    int vis = (showBig ? 1 : 0) | (showThresh ? 2 : 0) | (showTopBtns ? 4 : 0) | (showNudge ? 8 : 0);
+    int vis = (showBig ? 1 : 0) | (showThresh ? 2 : 0) | (showTopBtns ? 4 : 0) |
+              (showNudge ? 8 : 0) | (showWait ? 16 : 0);
     if (vis != lastVis) {
         lastVis = vis;
+        setHidden(honuImg, !showWait);
+        setHidden(waitLabel, !showWait);
+        setHidden(statusLabel, showWait);
         setHidden(bigLabel, !showBig);
         setHidden(threshLabel, !showThresh);
         setHidden(recalBtn, !showTopBtns);
