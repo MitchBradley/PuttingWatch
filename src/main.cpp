@@ -65,8 +65,12 @@ static volatile bool clickPending = false;
 static volatile bool calibratedCuePending = false;
 static volatile bool samplingPaused = false;
 
-// LVGL draw buffer (partial mode), one strip tall.
-static constexpr uint32_t kBufLines = 80;
+// LVGL draw buffer (partial mode). 100 lines so the tallest dynamic element
+// (the montserrat-48 angle label, a fixed 70 px box - see ui.cpp) always
+// redraws in a SINGLE tile => one monotonic top-to-bottom QSPI push, no
+// tearing. Prefer INTERNAL RAM (software render is much faster there than
+// into PSRAM); fall back to PSRAM if that block isn't free.
+static constexpr uint32_t kBufLines = 100;  // 410 * 100 * 2 = ~82 KB
 static lv_color_t* drawBuf = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -82,23 +86,24 @@ static void dispFlush(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map
 }
 
 static void touchRead(lv_indev_t*, lv_indev_data_t* data) {
-    int32_t x = touch->IIC_Read_Device_Value(
-        touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
-    int32_t y = touch->IIC_Read_Device_Value(
-        touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
-    if (touch->IIC_Interrupt_Flag) {
-        touch->IIC_Interrupt_Flag = false;
-        data->state = LV_INDEV_STATE_PRESSED;
-        data->point.x = x;
-        data->point.y = y;
-    } else {
+    // Called every lv_timer_handler pass - do zero I2C traffic unless the
+    // touch IRQ actually fired.
+    if (!touch->IIC_Interrupt_Flag) {
         data->state = LV_INDEV_STATE_RELEASED;
+        return;
     }
+    touch->IIC_Interrupt_Flag = false;
+    data->point.x = touch->IIC_Read_Device_Value(
+        touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
+    data->point.y = touch->IIC_Read_Device_Value(
+        touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
+    data->state = LV_INDEV_STATE_PRESSED;
 }
 
 // ---------------------------------------------------------------------------
-// Sampling task: fixed 100 Hz on core 1. Owns the IMU -> GravityFilter ->
-// SwingTracker pipeline; the UI only ever reads a snapshot of the result.
+// Sampling task: fixed 100 Hz, pinned to core 0 (the Arduino loop + LVGL run
+// on core 1). Owns the IMU -> GravityFilter -> SwingTracker pipeline; the UI
+// only ever reads a snapshot of the result.
 // ---------------------------------------------------------------------------
 static void samplingTask(void*) {
     const TickType_t period = pdMS_TO_TICKS(10);
@@ -157,6 +162,11 @@ static void wireUiHooks() {
 
 void setup() {
     USBSerial.begin(115200);
+    // CRITICAL: without this, HWCDC.write() blocks the calling task for up to
+    // ~1 s per call whenever no serial monitor is draining the port - which
+    // dragged the whole render loop down to ~1 Hz when running untethered.
+    // 0 = never block; drop bytes if the TX buffer is full.
+    USBSerial.setTxTimeoutMs(0);
     USBSerial.println("\nPuttingWatch booting");
 
     trackerMux = xSemaphoreCreateMutex();
@@ -176,8 +186,9 @@ void setup() {
 
     size_t bufBytes = LCD_WIDTH * kBufLines * sizeof(lv_color_t);
     drawBuf = static_cast<lv_color_t*>(
-        heap_caps_malloc(bufBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!drawBuf) drawBuf = static_cast<lv_color_t*>(heap_caps_malloc(bufBytes, MALLOC_CAP_8BIT));
+        heap_caps_malloc(bufBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+    if (!drawBuf)
+        drawBuf = static_cast<lv_color_t*>(heap_caps_malloc(bufBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
 
     lv_display_t* disp = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
     lv_display_set_flush_cb(disp, dispFlush);
@@ -197,7 +208,7 @@ void setup() {
     tracker.onClick = [] { clickPending = true; };
     tracker.onCalibrationComplete = [] { calibratedCuePending = true; };
 
-    xTaskCreatePinnedToCore(samplingTask, "sampling", 4096, nullptr, 3, nullptr, 1);
+    xTaskCreatePinnedToCore(samplingTask, "sampling", 4096, nullptr, 2, nullptr, 0);
 
     USBSerial.printf("setup done (imu=%d)\n", imuOk);
 }
@@ -209,11 +220,12 @@ void loop() {
     if (calibratedCuePending) { calibratedCuePending = false; clicker.playBeep(2); }
     clicker.tick();
 
-    // Snapshot the Model at ~15 Hz for the view (matches the phone app's UI
-    // throttle rationale - the audio/haptic path is full-rate via the task).
+    // Snapshot the Model at ~20 Hz for the view. Cheap now that ui::render
+    // only pushes what changed (the audio/haptic path is full-rate via the
+    // sampling task, independent of this).
     static uint32_t lastRender = 0;
     uint32_t now = millis();
-    if (now - lastRender >= 66) {
+    if (now - lastRender >= 50) {
         lastRender = now;
         ui::Snapshot snap;
         if (xSemaphoreTake(trackerMux, pdMS_TO_TICKS(5)) == pdTRUE) {
@@ -231,11 +243,15 @@ void loop() {
     }
 
     static uint32_t lastLog = 0;
-    if (now - lastLog >= 1000) {
+    if (USBSerial && now - lastLog >= 1000) {
         lastLog = now;
-        USBSerial.printf("state=%d phase=%d ready=%d angle=%.1f clicks=%d\n",
+        USBSerial.printf("state=%d phase=%d ready=%d angle=%.1f clicks=%d heap=%u\n",
                          (int)tracker.state(), (int)tracker.swingPhase(),
                          tracker.isReadyForSwing(), tracker.swingAngleDegrees(),
-                         tracker.clickCount());
+                         tracker.clickCount(), (unsigned)ESP.getFreeHeap());
     }
+
+    // Yield so the idle task on this core runs (feeds the task watchdog) -
+    // lv_timer_handler never blocks on its own.
+    delay(2);
 }
