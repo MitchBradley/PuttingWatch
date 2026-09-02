@@ -97,24 +97,24 @@ void init() {
     lv_obj_set_style_text_font(statusLabel, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(statusLabel, lv_color_white(), 0);
     lv_label_set_long_mode(statusLabel, LV_LABEL_LONG_WRAP);
-    lv_obj_set_size(statusLabel, LCD_WIDTH - 40, 80);
+    lv_obj_set_size(statusLabel, LCD_WIDTH - 40, 76);
     lv_obj_set_style_text_align(statusLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(statusLabel, LV_ALIGN_CENTER, 0, -78);
+    lv_obj_align(statusLabel, LV_ALIGN_CENTER, 0, -110);
 
     bigLabel = lv_label_create(root);
     lv_obj_set_style_text_font(bigLabel, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(bigLabel, lv_color_white(), 0);
     lv_obj_set_size(bigLabel, LCD_WIDTH, 70);
     lv_obj_set_style_text_align(bigLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(bigLabel, LV_ALIGN_CENTER, 0, 6);
+    lv_obj_align(bigLabel, LV_ALIGN_CENTER, 0, -25);
     lv_label_set_text(bigLabel, "");
 
     threshLabel = lv_label_create(root);
-    lv_obj_set_style_text_font(threshLabel, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(threshLabel, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(threshLabel, lv_color_white(), 0);
-    lv_obj_set_size(threshLabel, LCD_WIDTH, 40);
+    lv_obj_set_size(threshLabel, LCD_WIDTH, 64);
     lv_obj_set_style_text_align(threshLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(threshLabel, LV_ALIGN_CENTER, 0, 72);
+    lv_obj_align(threshLabel, LV_ALIGN_CENTER, 0, 60);
 }
 
 // render() is called ~20x/s. It MUST only touch an LVGL object when that
