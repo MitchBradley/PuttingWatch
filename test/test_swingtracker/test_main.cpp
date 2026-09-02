@@ -84,14 +84,12 @@ void test_backswing_clicks_then_reversal(void) {
     TEST_ASSERT_EQUAL_INT(4, t.clickCount());
     TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::Backswing);
 
-    // Come back down. Reversal (>=2 deg below the 25 deg peak) switches to
-    // ForwardStroke and stops clicking. Because reversalDrop (2 deg) is
-    // smaller than the click interval (6 deg), a slow descent can slip one
-    // bucket - and fire one last click - in the ~1 deg window between leaving
-    // bucket 4 (angle < 24) and the reversal trigger (angle <= 23); the Swift
-    // watch app behaves identically. So: at most one stray click, then done.
+    // Come back down. Clicking is off the monotonic peak, so the descent
+    // fires NOTHING - no stray "click twice" as the angle re-crosses a
+    // threshold before reversalDrop trips. Reversal (>=2 deg below the peak)
+    // still switches to ForwardStroke.
     ramp(t, 25.0f, 0.0f, 60, clock);
-    TEST_ASSERT_TRUE(clicks == 4 || clicks == 5);
+    TEST_ASSERT_EQUAL_INT(4, clicks);
     TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::ForwardStroke);
     TEST_ASSERT_FALSE(t.isReadyForSwing());
 
@@ -114,6 +112,29 @@ void test_small_swing_still_reverses(void) {
     ramp(t, 4.0f, 1.0f, 30, clock);   // drop 3 deg below peak
 
     TEST_ASSERT_EQUAL_INT(0, clicks);
+    TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::ForwardStroke);
+}
+
+// Jitter/dither across a threshold boundary must not double-click - the
+// on-device "can't get just one click, it clicks twice" report.
+void test_boundary_jitter_single_click(void) {
+    SwingTracker t;
+    t.setClickThresholdDegrees(6.0f);
+    uint32_t clock = 0;
+    calibrateIntoMonitoring(t, clock);
+
+    int clicks = 0;
+    t.onClick = [&] { clicks++; };
+
+    ramp(t, 0.0f, 7.0f, 25, clock);   // cross 6 deg once
+    for (int i = 0; i < 6; i++) {     // wobble either side of 6 deg
+        ramp(t, 7.0f, 5.0f, 8, clock);
+        ramp(t, 5.0f, 7.0f, 8, clock);
+    }
+    TEST_ASSERT_EQUAL_INT(1, clicks);
+
+    ramp(t, 7.0f, 0.0f, 40, clock);   // reverse home
+    TEST_ASSERT_EQUAL_INT(1, clicks);
     TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::ForwardStroke);
 }
 
@@ -175,6 +196,7 @@ int main(int, char**) {
     RUN_TEST(test_calibration_flow);
     RUN_TEST(test_backswing_clicks_then_reversal);
     RUN_TEST(test_small_swing_still_reverses);
+    RUN_TEST(test_boundary_jitter_single_click);
     RUN_TEST(test_rearm_when_settled_near_original_rest);
     RUN_TEST(test_no_rearm_when_settled_far_from_original_rest);
     RUN_TEST(test_recal_resets_everything);

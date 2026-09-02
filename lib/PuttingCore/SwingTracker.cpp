@@ -96,14 +96,17 @@ void SwingTracker::processMonitoringSample(const MotionSample& s) {
         case SwingPhase::Backswing: {
             if (angle > peakAngleThisSwing_) peakAngleThisSwing_ = angle;
 
-            // Edge-triggered on the floor-quantised bucket changing, so it
-            // fires once per crossing rather than continuously near a
-            // multiple. One click per sample even if the bucket jumped by
-            // more than one (matches the watch app; the phone app instead
-            // loops to emit one per crossed threshold - a future upgrade).
-            const int bucket = static_cast<int>(angle / clickThresholdDegrees_);
-            if (bucket != lastClickBucket_) {
-                lastClickBucket_ = bucket;
+            // Click off the MONOTONIC peak, not the instantaneous angle:
+            // - never fires on the way back down (the angle re-crossing a
+            //   threshold before reversalDrop trips was the "clicks twice"),
+            // - immune to jitter dithering across a threshold boundary,
+            // - still fires at the same instant on the way up (peak == angle
+            //   while rising).
+            // Loop so a fast swing that jumps several thresholds in one
+            // sample still emits one click per threshold crossed.
+            const int peakBucket = static_cast<int>(peakAngleThisSwing_ / clickThresholdDegrees_);
+            while (lastClickBucket_ < peakBucket) {
+                lastClickBucket_++;
                 clickCount_++;
                 if (onClick) onClick();
             }
