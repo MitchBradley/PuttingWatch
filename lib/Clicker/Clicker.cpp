@@ -93,7 +93,7 @@ bool Clicker::begin() {
     renderTone(tickBuf_, tickFrames_, kTickHz, 0.6f, ramp);
     renderTone(beepBuf_, beepFrames_, kBeepHz, 0.5f, ramp);
 
-    digitalWrite(PA_CTRL, HIGH);  // amp on, stays on
+    // Amp stays off (LOW, from the top of begin()) until setAmpEnabled(true).
 
     queue_ = xQueueCreate(8, sizeof(uint8_t));
     xTaskCreatePinnedToCore(audioTaskThunk, "audio", 3072, this, 1, nullptr, 0);
@@ -136,6 +136,13 @@ void Clicker::playCue(uint8_t id) {
     if (id >= CUE_COUNT || kCues[id].frames == 0) return;  // not compiled in - silent
     uint8_t k = kCueQueueBase + id;
     xQueueSend(queue_, &k, 0);
+}
+
+void Clicker::setAmpEnabled(bool on) {
+    if (!ok_ || on == ampOn_) return;
+    ampOn_ = on;
+    digitalWrite(PA_CTRL, on ? HIGH : LOW);
+    if (on) delay(kAmpSettleMs);  // out of shutdown before the first sample
 }
 
 void Clicker::audioTask() {

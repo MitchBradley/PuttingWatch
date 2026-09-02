@@ -188,7 +188,7 @@ static void enterLightSleep() {
     USBSerial.flush();
     delay(20);  // let the last serial bytes out before USB-CDC powers down
     gfx->displayOff();
-    digitalWrite(PA_CTRL, LOW);
+    clicker.setAmpEnabled(false);
 
     esp_sleep_enable_gpio_wakeup();
     gpio_wakeup_enable((gpio_num_t)TP_INT, GPIO_INTR_LOW_LEVEL);
@@ -200,7 +200,8 @@ static void enterLightSleep() {
 
     gfx->displayOn();
     gfx->fillScreen(BLACK);
-    digitalWrite(PA_CTRL, HIGH);
+    // Amp stays off; the next loop() iteration re-enables it if we woke back
+    // into the run state.
     lv_obj_invalidate(lv_screen_active());  // full repaint
 
     touch->IIC_Interrupt_Flag = false;
@@ -391,6 +392,14 @@ void loop() {
             snap.batteryPct = batteryPct;
             snap.batteryMv = batteryMv;
             ui::render(snap);
+
+            // Power: the NS4150B amp only needs to be on while sounds can play.
+            // Enable it as soon as calibration starts (Accumulating) rather
+            // than on entry to Monitoring, so it has the full ~2 s hold-still
+            // window to leave shutdown - otherwise the attack of the first
+            // spoken interval ("six") on the main screen is clipped. Off again
+            // on Recal (back to WaitingForCalibration).
+            clicker.setAmpEnabled(snap.state != SwingTracker::State::WaitingForCalibration);
 
             // Cue for "calibration done, main screen is up": speak the current
             // click interval (e.g. "seven") the first time we land on the

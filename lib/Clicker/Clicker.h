@@ -24,6 +24,11 @@ class Clicker {
     void playNumber(int n);   // spoken number (whatever's compiled in); tone fallback
     void playCue(uint8_t id);  // named voice cue (CueId, e.g. CUE_READY); no-op if absent
 
+    // NS4150B power-amp enable. Kept off except when sounds can actually play
+    // (the run state) to save its few-mA quiescent draw. Enabling blocks
+    // briefly so the amp is out of shutdown before the first sample.
+    void setAmpEnabled(bool on);
+
     void tick() {}  // kept for API compatibility; playback is task-driven now
 
   private:
@@ -33,6 +38,8 @@ class Clicker {
     void audioTask();
 
     bool ok_ = false;
+    bool ampOn_ = false;
+    static constexpr int kAmpSettleMs = 10;  // NS4150B shutdown-release before audio
     void* es_ = nullptr;  // es8311_handle_t
 
     static constexpr int kSampleRate = 16000;
