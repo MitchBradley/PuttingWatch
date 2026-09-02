@@ -22,6 +22,7 @@ future work — see `~/.claude/plans/shimmying-finding-whale.md`.
 | `lib/Imu/` | QMI8658 driver wrapper (lewisxhe/SensorLib) | ⏳ needs board |
 | `lib/Clicker/` | Feedback renderer — ES8311 codec + speaker over I2S, playback on its own task | 🔨 compiles; runtime needs board |
 | `lib/Es8311/` | Vendored ES8311 codec driver (Espressif/Waveshare) | — |
+| `lib/Battery/` | AXP2101 battery-percentage readout (XPowersLib) | 🔨 compiles; runtime needs board |
 | `src/ui.*` | LVGL 9 view: state-mapped screens, background tint, click-interval slider | 🔨 compiles; runtime needs board |
 | `src/main.cpp` | Board bring-up + wiring; 100 Hz sampling task on core 1, LVGL on core 0 | 🔨 compiles; runtime needs board |
 | `lib/Arduino_DriveBus/` | Vendored Waveshare FT3168 touch driver (not on the PlatformIO registry) | — |
@@ -62,7 +63,8 @@ pio run -e esp32s3 -t upload -t monitor
    a finger touch registers.
 2. Serial prints `state=… phase=… ready=… angle=… clicks=…` once a second.
 3. Tap → "Hold still…" (yellow) for ~2 s → rest x/y/z shown → live angle
-   screen.
+   screen. A battery bar + percentage sits below the top buttons (shows
+   "--" if the AXP2101 reports no battery, e.g. USB-only).
 4. Hold the board level, then tilt it about one axis: the angle number
    tracks, and an audible click fires every `click:` degrees. (Two short
    tones also play when calibration completes.)

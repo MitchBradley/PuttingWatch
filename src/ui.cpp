@@ -20,6 +20,8 @@ lv_obj_t* bigLabel = nullptr;   // swing angle in Monitoring, rest xyz in Done
 lv_obj_t* threshLabel = nullptr;
 lv_obj_t* recalBtn = nullptr;
 lv_obj_t* stopBtn = nullptr;
+lv_obj_t* battBar = nullptr;
+lv_obj_t* battLabel = nullptr;
 lv_obj_t* minusBtn = nullptr;
 lv_obj_t* plusBtn = nullptr;
 
@@ -79,10 +81,24 @@ void init() {
     lv_obj_add_event_cb(root, rootClicked, LV_EVENT_CLICKED, nullptr);
 
     // Recal / Stop across the TOP.
-    recalBtn = makeButton("Recal", recalClicked, LV_ALIGN_TOP_MID, -88, 16, 150, 88,
+    recalBtn = makeButton("Recal", recalClicked, LV_ALIGN_TOP_MID, -88, 12, 150, 82,
                           &lv_font_montserrat_28);
-    stopBtn = makeButton("Stop", stopClicked, LV_ALIGN_TOP_MID, 88, 16, 150, 88,
+    stopBtn = makeButton("Stop", stopClicked, LV_ALIGN_TOP_MID, 88, 12, 150, 82,
                          &lv_font_montserrat_28);
+
+    // Battery: a plain bar + a "NN%" number to its right, just below the top
+    // buttons (no label). Shown only when the top buttons are (Monitoring/Done).
+    battBar = lv_bar_create(root);
+    lv_obj_set_size(battBar, 132, 20);
+    lv_bar_set_range(battBar, 0, 100);
+    lv_obj_align(battBar, LV_ALIGN_TOP_MID, -46, 104);
+    lv_obj_set_style_bg_color(battBar, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(battBar, lv_color_hex(0x33C04D), LV_PART_INDICATOR);
+
+    battLabel = lv_label_create(root);
+    lv_obj_set_style_text_font(battLabel, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(battLabel, lv_color_white(), 0);
+    lv_obj_align_to(battLabel, battBar, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
 
     // Click-interval - / + across the BOTTOM (no slider).
     minusBtn = makeButton("-", minusClicked, LV_ALIGN_BOTTOM_MID, -88, -16, 140, 104,
@@ -97,16 +113,18 @@ void init() {
     lv_obj_set_style_text_font(statusLabel, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(statusLabel, lv_color_white(), 0);
     lv_label_set_long_mode(statusLabel, LV_LABEL_LONG_WRAP);
-    lv_obj_set_size(statusLabel, LCD_WIDTH - 40, 76);
+    lv_obj_set_size(statusLabel, LCD_WIDTH - 40, 72);
     lv_obj_set_style_text_align(statusLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(statusLabel, LV_ALIGN_CENTER, 0, -110);
+    // Dropped from -110 to -60: in Monitoring "Ready" sat jammed against the
+    // top buttons; now it sits just above the angle readout.
+    lv_obj_align(statusLabel, LV_ALIGN_CENTER, 0, -60);
 
     bigLabel = lv_label_create(root);
     lv_obj_set_style_text_font(bigLabel, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(bigLabel, lv_color_white(), 0);
     lv_obj_set_size(bigLabel, LCD_WIDTH, 70);
     lv_obj_set_style_text_align(bigLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(bigLabel, LV_ALIGN_CENTER, 0, -25);
+    lv_obj_align(bigLabel, LV_ALIGN_CENTER, 0, 4);
     lv_label_set_text(bigLabel, "");
 
     threshLabel = lv_label_create(root);
@@ -114,7 +132,7 @@ void init() {
     lv_obj_set_style_text_color(threshLabel, lv_color_white(), 0);
     lv_obj_set_size(threshLabel, LCD_WIDTH, 64);
     lv_obj_set_style_text_align(threshLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(threshLabel, LV_ALIGN_CENTER, 0, 60);
+    lv_obj_align(threshLabel, LV_ALIGN_CENTER, 0, 74);
 }
 
 // render() is called ~20x/s. It MUST only touch an LVGL object when that
@@ -130,6 +148,7 @@ void render(const Snapshot& s) {
     static char lastThresh[48] = "\x01";
     static uint32_t lastBg = 0xFFFFFFFFu;
     static int lastVis = -1;
+    static int lastBatt = -2;
 
     char status[48] = "";
     char big[48] = "";
@@ -181,6 +200,17 @@ void render(const Snapshot& s) {
         lastBg = bg;
         lv_obj_set_style_bg_color(root, lv_color_hex(bg), LV_PART_MAIN);
     }
+    if (showTopBtns && s.batteryPct != lastBatt) {
+        lastBatt = s.batteryPct;
+        int pct = s.batteryPct;
+        lv_bar_set_value(battBar, pct < 0 ? 0 : pct, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(battBar,
+                                  lv_color_hex(pct >= 0 && pct <= 20 ? 0xE03B24 : 0x33C04D),
+                                  LV_PART_INDICATOR);
+        char b[8];
+        snprintf(b, sizeof(b), pct < 0 ? "--" : "%d%%", pct);
+        lv_label_set_text(battLabel, b);
+    }
 
     int vis = (showBig ? 1 : 0) | (showThresh ? 2 : 0) | (showTopBtns ? 4 : 0) | (showNudge ? 8 : 0);
     if (vis != lastVis) {
@@ -189,6 +219,8 @@ void render(const Snapshot& s) {
         setHidden(threshLabel, !showThresh);
         setHidden(recalBtn, !showTopBtns);
         setHidden(stopBtn, !showTopBtns);
+        setHidden(battBar, !showTopBtns);
+        setHidden(battLabel, !showTopBtns);
         setHidden(minusBtn, !showNudge);
         setHidden(plusBtn, !showNudge);
     }

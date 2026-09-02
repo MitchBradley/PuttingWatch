@@ -32,6 +32,7 @@
 #include "MotionSample.h"
 #include "Imu.h"
 #include "Clicker.h"
+#include "Battery.h"
 #include "ui.h"
 
 HWCDC USBSerial;
@@ -62,6 +63,8 @@ static Imu imu;
 static GravityFilter gravityFilter;
 static SwingTracker tracker;
 static Clicker clicker;
+static Battery battery;
+static volatile int batteryPct = -1;  // updated from loop() every few seconds
 
 static SemaphoreHandle_t trackerMux;        // guards all `tracker` access
 static volatile bool clickPending = false;
@@ -267,6 +270,7 @@ void setup() {
     if (!touch->begin()) USBSerial.println("FT3168 begin failed");
     bool imuOk = imu.begin(Wire, IMU_I2C_ADDR);
     if (!imuOk) USBSerial.println("QMI8658 begin failed - check wiring/address");
+    if (!battery.begin(Wire)) USBSerial.println("AXP2101 begin failed - no battery gauge");
 
     // --- LVGL ---
     lv_init();
@@ -314,6 +318,13 @@ void loop() {
     if (calibratedCuePending) { calibratedCuePending = false; clicker.playBeep(2); }
     clicker.tick();
 
+    // Battery: poll the AXP2101 every 5 s (and once on the first loop).
+    static uint32_t lastBatt = 0;
+    if (lastBatt == 0 || millis() - lastBatt >= 5000) {
+        lastBatt = millis();
+        batteryPct = battery.percent();
+    }
+
     // Snapshot the Model at ~20 Hz for the view. Cheap now that ui::render
     // only pushes what changed (the audio/haptic path is full-rate via the
     // sampling task, independent of this).
@@ -332,6 +343,7 @@ void loop() {
             tracker.restGravity().store(snap.restG);
             xSemaphoreGive(trackerMux);
             snap.imuOk = imu.ok();
+            snap.batteryPct = batteryPct;
             ui::render(snap);
         }
     }
