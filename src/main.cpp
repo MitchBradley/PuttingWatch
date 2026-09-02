@@ -414,6 +414,20 @@ void loop() {
                 clicker.playCue(CUE_READY);
             }
             lastReady = snap.ready;
+
+            // Power: run the CPU at 80 MHz in the run (Monitoring) state. The
+            // workload there - 100 Hz sampling + gravity/swing math, 20 Hz
+            // partial LVGL render, on-demand audio - doesn't need 240 MHz, and
+            // 80 MHz keeps the same 80 MHz APB clock so I2C/I2S/timers are
+            // unaffected. Full speed elsewhere (boot, the image-heavy waiting
+            // screen, calibration).
+            static uint32_t curCpuMhz = 240;
+            uint32_t wantCpuMhz = (snap.state == SwingTracker::State::Monitoring) ? 80 : 240;
+            if (wantCpuMhz != curCpuMhz) {
+                setCpuFrequencyMhz(wantCpuMhz);
+                curCpuMhz = wantCpuMhz;
+                USBSerial.printf("cpu -> %u MHz\n", (unsigned)getCpuFrequencyMhz());
+            }
         }
     }
 
