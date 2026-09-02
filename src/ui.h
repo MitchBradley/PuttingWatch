@@ -18,6 +18,7 @@ struct Snapshot {
     float restG[3] = {0, 0, 0};
     bool imuOk = true;
     int batteryPct = -1;  // 0..100, -1 = unknown
+    int batteryMv = -1;   // terminal voltage, mV, -1 = unknown
 };
 
 void init();

@@ -105,18 +105,23 @@ void init() {
     stopBtn = makeButton("Stop", stopClicked, LV_ALIGN_TOP_MID, 88, 12, 150, 82,
                          &lv_font_montserrat_28);
 
-    // Battery: a plain bar + a "NN%" number to its right, just below the top
-    // buttons (no label). Shown only when the top buttons are (Monitoring/Done).
+    // Battery: a plain bar + "NN% NNNN mV" to its right, just below the top
+    // buttons. Shown only when the top buttons are (Monitoring/Done). The
+    // label gets a FIXED box + left-aligned text - an auto-sized label
+    // leaves stale glyph pixels behind on the right when the text shrinks
+    // and tears while it reflows.
     battBar = lv_bar_create(root);
-    lv_obj_set_size(battBar, 132, 20);
+    lv_obj_set_size(battBar, 108, 20);
     lv_bar_set_range(battBar, 0, 100);
-    lv_obj_align(battBar, LV_ALIGN_TOP_MID, -46, 104);
+    lv_obj_align(battBar, LV_ALIGN_TOP_MID, -81, 112);
     lv_obj_set_style_bg_color(battBar, lv_color_hex(0x333333), LV_PART_MAIN);
     lv_obj_set_style_bg_color(battBar, lv_color_hex(0x33C04D), LV_PART_INDICATOR);
 
     battLabel = lv_label_create(root);
-    lv_obj_set_style_text_font(battLabel, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(battLabel, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(battLabel, lv_color_white(), 0);
+    lv_obj_set_size(battLabel, 180, 34);  // fits "100% 4200 mV"
+    lv_obj_set_style_text_align(battLabel, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_align_to(battLabel, battBar, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
 
     // Click-interval - / + across the BOTTOM (no slider).
@@ -169,6 +174,7 @@ void render(const Snapshot& s) {
     static uint32_t lastBg = 0xFFFFFFFFu;
     static int lastVis = -1;
     static int lastBatt = -2;
+    static int lastBattMv = -2;
 
     char status[48] = "";
     char wait[48] = "";
@@ -230,15 +236,19 @@ void render(const Snapshot& s) {
         lastBg = bg;
         lv_obj_set_style_bg_color(root, lv_color_hex(bg), LV_PART_MAIN);
     }
-    if (showTopBtns && s.batteryPct != lastBatt) {
+    if (showTopBtns && (s.batteryPct != lastBatt || s.batteryMv != lastBattMv)) {
         lastBatt = s.batteryPct;
+        lastBattMv = s.batteryMv;
         int pct = s.batteryPct;
         lv_bar_set_value(battBar, pct < 0 ? 0 : pct, LV_ANIM_OFF);
         lv_obj_set_style_bg_color(battBar,
                                   lv_color_hex(pct >= 0 && pct <= 20 ? 0xE03B24 : 0x33C04D),
                                   LV_PART_INDICATOR);
-        char b[8];
-        snprintf(b, sizeof(b), pct < 0 ? "--" : "%d%%", pct);
+        char b[20];
+        if (pct < 0)
+            snprintf(b, sizeof(b), "--");
+        else
+            snprintf(b, sizeof(b), "%d%% %d mV", pct, s.batteryMv);
         lv_label_set_text(battLabel, b);
     }
 

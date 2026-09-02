@@ -19,6 +19,7 @@
 #include <Wire.h>
 #include <esp_heap_caps.h>
 #include <esp_sleep.h>
+#include <esp_system.h>
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
 #include <lvgl.h>
@@ -52,8 +53,12 @@ static Arduino_GFX* gfx =
 static std::shared_ptr<Arduino_IIC_DriveBus> iicBus =
     std::make_shared<Arduino_HWIIC>(IIC_SDA, IIC_SCL, &Wire);
 static void touchIsr();
+// Pass TP_RESET so touch->begin() hardware-resets the FT3168. Matters on a
+// deep-sleep wake: the panel stayed powered through the sleep, so without a
+// reset the chip comes back mid-I2C-transaction and the first reads fail
+// (ESP_ERR_INVALID_STATE) until it self-recovers.
 static std::unique_ptr<Arduino_IIC> touch(
-    new Arduino_FT3x68(iicBus, FT3168_DEVICE_ADDRESS, DRIVEBUS_DEFAULT_VALUE, TP_INT, touchIsr));
+    new Arduino_FT3x68(iicBus, FT3168_DEVICE_ADDRESS, TP_RESET, TP_INT, touchIsr));
 static void touchIsr() { touch->IIC_Interrupt_Flag = true; }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +70,7 @@ static SwingTracker tracker;
 static Clicker clicker;
 static Battery battery;
 static volatile int batteryPct = -1;  // updated from loop() every few seconds
+static volatile int batteryMv = -1;
 
 static SemaphoreHandle_t trackerMux;        // guards all `tracker` access
 static volatile bool clickPending = false;
@@ -251,7 +257,10 @@ void setup() {
     // dragged the whole render loop down to ~1 Hz when running untethered.
     // 0 = never block; drop bytes if the TX buffer is full.
     USBSerial.setTxTimeoutMs(0);
-    USBSerial.println("\nPuttingWatch booting");
+    // Diagnostic for the deep-sleep-drain question: reset reason 8 =
+    // ESP_RST_DEEPSLEEP; wakeup cause 3 = ESP_SLEEP_WAKEUP_EXT1 (BOOT button).
+    USBSerial.printf("\nPuttingWatch booting (reset=%d wake=%d)\n",
+                     (int)esp_reset_reason(), (int)esp_sleep_get_wakeup_cause());
 
     // Release any pad holds left latched by a prior deep sleep (see
     // enterDeepSleep) before anything reconfigures those pins.
@@ -318,11 +327,19 @@ void loop() {
     if (calibratedCuePending) { calibratedCuePending = false; clicker.playBeep(2); }
     clicker.tick();
 
-    // Battery: poll the AXP2101 every 5 s (and once on the first loop).
+    // Battery: poll the AXP2101 voltage every 5 s (and once on the first
+    // loop), EMA-smooth it, and derive % from a LiPo voltage curve - the
+    // chip's own fuel-gauge % is unusable on this board.
     static uint32_t lastBatt = 0;
     if (lastBatt == 0 || millis() - lastBatt >= 5000) {
         lastBatt = millis();
-        batteryPct = battery.percent();
+        int mv = battery.millivolts();
+        if (mv > 0) {
+            static int emaMv = 0;
+            emaMv = (emaMv == 0) ? mv : emaMv + (mv - emaMv) / 3;
+            batteryMv = emaMv;
+            batteryPct = Battery::percentForMillivolts(emaMv);
+        }
     }
 
     // Snapshot the Model at ~20 Hz for the view. Cheap now that ui::render
@@ -344,6 +361,7 @@ void loop() {
             xSemaphoreGive(trackerMux);
             snap.imuOk = imu.ok();
             snap.batteryPct = batteryPct;
+            snap.batteryMv = batteryMv;
             ui::render(snap);
         }
     }
@@ -351,10 +369,11 @@ void loop() {
     static uint32_t lastLog = 0;
     if (USBSerial && now - lastLog >= 1000) {
         lastLog = now;
-        USBSerial.printf("state=%d phase=%d ready=%d angle=%.1f clicks=%d heap=%u\n",
+        USBSerial.printf("state=%d phase=%d ready=%d angle=%.1f clicks=%d batt=%d%% %d mV heap=%u\n",
                          (int)tracker.state(), (int)tracker.swingPhase(),
                          tracker.isReadyForSwing(), tracker.swingAngleDegrees(),
-                         tracker.clickCount(), (unsigned)ESP.getFreeHeap());
+                         tracker.clickCount(), batteryPct, batteryMv,
+                         (unsigned)ESP.getFreeHeap());
     }
 
     // Yield so the idle task on this core runs (feeds the task watchdog) -
