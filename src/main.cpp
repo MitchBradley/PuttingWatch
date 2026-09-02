@@ -398,11 +398,22 @@ void loop() {
             // double-beep, and holds the announcement back to this point
             // rather than firing it right after the session starts.
             static SwingTracker::State lastCueState = SwingTracker::State::WaitingForCalibration;
-            if (snap.state == SwingTracker::State::Monitoring &&
-                lastCueState != SwingTracker::State::Monitoring) {
+            bool enteredMonitoring = snap.state == SwingTracker::State::Monitoring &&
+                                     lastCueState != SwingTracker::State::Monitoring;
+            if (enteredMonitoring) {
                 clicker.playNumber((int)lroundf(snap.clickThresholdDeg));
             }
             lastCueState = snap.state;
+
+            // "Ready" cue: speak assets/ready.wav on a rising edge of the
+            // armed state - i.e. when re-armed for the next stroke after a
+            // putt. Skip the edge that coincides with entering Monitoring;
+            // the click-interval announcement above already signals "go".
+            static bool lastReady = false;
+            if (snap.ready && !lastReady && !enteredMonitoring) {
+                clicker.playCue(CUE_READY);
+            }
+            lastReady = snap.ready;
         }
     }
 

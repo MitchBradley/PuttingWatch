@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
-"""Convert assets/{four..twelve}.wav (Piper output) into
+"""Convert assets/{one..twenty}.wav (Piper output) into
 src/assets/numbers_audio.c - spoken click-threshold values.
 
 Each WAV is resampled to 16 kHz mono 16-bit, silence-trimmed, normalised, and
-given short raised-cosine fades. Run this after (re)generating the WAVs:
+given short raised-cosine fades (see tools/wav2c_common.py). Run this after
+(re)generating the WAVs:
 
     python3 tools/wav2c_numbers.py
 
 stdlib only. Handles any input rate / mono or stereo / 16-bit PCM WAV.
 """
-import math
 import os
-import struct
 import sys
-import wave
 
-RATE = 16000  # must match Clicker::kSampleRate
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from wav2c_common import RATE, emit_pcm_array, load_sample
 
 # Any of these whose assets/<word>.wav exists gets compiled in; the generated
 # table is sized to the largest one present.
@@ -31,62 +30,6 @@ ASSETS = os.path.join(HERE, "..", "assets")
 OUT = os.path.join(HERE, "..", "src", "assets", "numbers_audio.c")
 
 
-def read_wav_mono(path):
-    with wave.open(path, "rb") as w:
-        assert w.getsampwidth() == 2, f"{path}: expected 16-bit PCM"
-        ch, sr, n = w.getnchannels(), w.getframerate(), w.getnframes()
-        raw = w.readframes(n)
-    s = struct.unpack("<%dh" % (len(raw) // 2), raw)
-    if ch == 2:
-        s = [(s[i] + s[i + 1]) // 2 for i in range(0, len(s), 2)]
-    return list(s), sr
-
-
-def resample(s, src_rate, dst_rate):
-    if src_rate == dst_rate:
-        return s
-    ratio = src_rate / dst_rate
-    if ratio > 1.0:  # downsampling - cheap box pre-filter to tame aliasing
-        k = int(math.ceil(ratio))
-        s = [sum(s[max(0, i - k + 1):i + 1]) / min(k, i + 1) for i in range(len(s))]
-    out = []
-    n_out = int(len(s) / ratio)
-    for i in range(n_out):
-        x = i * ratio
-        i0 = int(x)
-        i1 = min(i0 + 1, len(s) - 1)
-        f = x - i0
-        out.append(s[i0] * (1 - f) + s[i1] * f)
-    return out
-
-
-def trim(s, pad_ms=6):
-    peak = max((abs(v) for v in s), default=1)
-    thr = max(150, peak * 0.02)
-    lo, hi = 0, len(s)
-    while lo < len(s) and abs(s[lo]) < thr:
-        lo += 1
-    while hi > lo and abs(s[hi - 1]) < thr:
-        hi -= 1
-    pad = int(RATE * pad_ms / 1000)
-    return s[max(0, lo - pad):min(len(s), hi + pad)]
-
-
-def normalize(s, target=0.80):  # headroom - the codec + amp path clips near full-scale
-    peak = max((abs(v) for v in s), default=1)
-    g = (target * 32767.0) / peak if peak else 1.0
-    return [max(-32768, min(32767, int(round(v * g)))) for v in s]
-
-
-def fade(s, ms=5):
-    n = min(int(RATE * ms / 1000), len(s) // 2)
-    for i in range(n):
-        e = 0.5 - 0.5 * math.cos(math.pi * i / n)
-        s[i] = int(s[i] * e)
-        s[-1 - i] = int(s[-1 - i] * e)
-    return s
-
-
 def main():
     samples = {}
     for word, num in WORDS.items():
@@ -94,8 +37,7 @@ def main():
         if not os.path.exists(path):
             print(f"  (missing {word}.wav - skipping)", file=sys.stderr)
             continue
-        s, sr = read_wav_mono(path)
-        s = fade(normalize(trim(resample(s, sr, RATE))))
+        s = load_sample(path)
         samples[num] = s
         print(f"  {word}: {len(s)} frames ({len(s) / RATE * 1000:.0f} ms, {len(s) * 2} B)")
 
@@ -103,10 +45,7 @@ def main():
     count = (max(samples) + 1) if samples else 1  # valid indices 0 .. count-1
     lines = ['#include "numbers_audio.h"', ""]
     for num, s in sorted(samples.items()):
-        lines.append(f"static const int16_t num{num}_pcm[] = {{")
-        for i in range(0, len(s), 16):
-            lines.append("    " + ",".join(str(v) for v in s[i:i + 16]) + ",")
-        lines.append("};")
+        lines += emit_pcm_array(f"num{num}_pcm", s)
         lines.append("")
     lines.append(f"const NumberSample kNumberSamples[{count}] = {{")
     for n in range(count):

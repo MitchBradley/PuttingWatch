@@ -8,3 +8,7 @@ compile_commands.json
 *.onnx
 *.onnx.json
 /output.wav
+
+# Python bytecode cache (tools/)
+__pycache__/
+*.pyc

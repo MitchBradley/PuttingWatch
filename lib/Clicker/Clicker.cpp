@@ -51,6 +51,18 @@ void Clicker::renderTone(int16_t* dst, int nFrames, float freqHz, float amp, int
     }
 }
 
+// Stream a mono 16 kHz PCM sample out of the stereo I2S port, duplicating
+// each frame L/R, in stereoScratch_-sized chunks.
+void Clicker::streamMono(const int16_t* data, int frames) {
+    for (int off = 0; off < frames; off += kStereoChunkFrames) {
+        int n = frames - off;
+        if (n > kStereoChunkFrames) n = kStereoChunkFrames;
+        for (int i = 0; i < n; i++)
+            stereoScratch_[2 * i] = stereoScratch_[2 * i + 1] = data[off + i];
+        i2s.write((uint8_t*)stereoScratch_, n * 2 * sizeof(int16_t));
+    }
+}
+
 bool Clicker::begin() {
     pinMode(PA_CTRL, OUTPUT);
     digitalWrite(PA_CTRL, LOW);  // amp off until the codec is up
@@ -119,6 +131,13 @@ void Clicker::playNumber(int n) {
     xQueueSend(queue_, &k, 0);
 }
 
+void Clicker::playCue(uint8_t id) {
+    if (!ok_) return;
+    if (id >= CUE_COUNT || kCues[id].frames == 0) return;  // not compiled in - silent
+    uint8_t k = kCueQueueBase + id;
+    xQueueSend(queue_, &k, 0);
+}
+
 void Clicker::audioTask() {
     uint8_t item;
     for (;;) {
@@ -127,18 +146,15 @@ void Clicker::audioTask() {
             i2s.write((uint8_t*)clickBuf_, clickFrames_ * 2 * sizeof(int16_t));
         } else if (item == 2) {
             i2s.write((uint8_t*)tickBuf_, tickFrames_ * 2 * sizeof(int16_t));
+        } else if (item >= kCueQueueBase) {
+            int id = item - kCueQueueBase;
+            if (id < CUE_COUNT && kCues[id].frames)
+                streamMono(kCues[id].data, kCues[id].frames);
         } else if (item >= kNumberQueueBase + 1) {
             // Spoken number: stream the mono sample out as stereo in chunks.
             int n = item - kNumberQueueBase;
-            if (n >= kNumberSamplesCount) continue;
-            const NumberSample& s = kNumberSamples[n];
-            for (int off = 0; off < s.frames; off += kStereoChunkFrames) {
-                int n = s.frames - off;
-                if (n > kStereoChunkFrames) n = kStereoChunkFrames;
-                for (int i = 0; i < n; i++)
-                    stereoScratch_[2 * i] = stereoScratch_[2 * i + 1] = s.data[off + i];
-                i2s.write((uint8_t*)stereoScratch_, n * 2 * sizeof(int16_t));
-            }
+            if (n < kNumberSamplesCount)
+                streamMono(kNumberSamples[n].data, kNumberSamples[n].frames);
         } else {
             i2s.write((uint8_t*)beepBuf_, beepFrames_ * 2 * sizeof(int16_t));
             vTaskDelay(pdMS_TO_TICKS(60));  // gap between calibration beeps

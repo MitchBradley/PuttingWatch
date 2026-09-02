@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include "cues_audio.h"  // CueId (CUE_READY, ...)
 
 // Feedback renderer. Pure output: no swing logic - it is told "click" or
 // "beep N times" and nothing more (the Model/renderer split from the Swift
@@ -20,12 +21,14 @@ class Clicker {
     void playClick();      // motion click - short, high
     void playTick();       // UI button confirm - short, lower pitch than the click
     void playBeep(int n);  // n longer tones - calibration cue
-    void playNumber(int n);  // spoken number (whatever's compiled in); tone fallback
+    void playNumber(int n);   // spoken number (whatever's compiled in); tone fallback
+    void playCue(uint8_t id);  // named voice cue (CueId, e.g. CUE_READY); no-op if absent
 
     void tick() {}  // kept for API compatibility; playback is task-driven now
 
   private:
     void renderTone(int16_t* dst, int nFrames, float freqHz, float amp, int rampFrames);
+    void streamMono(const int16_t* data, int frames);  // mono PCM -> stereo I2S, chunked
     static void audioTaskThunk(void* self) { static_cast<Clicker*>(self)->audioTask(); }
     void audioTask();
 
@@ -52,7 +55,9 @@ class Clicker {
 
     // uint8_t queue: 0 = click, 1 = beep, 2 = tick; a spoken number n is
     // queued as kNumberQueueBase + n (numbers can be 1/2, which would
-    // otherwise collide with the tone codes).
+    // otherwise collide with the tone codes); a voice cue id is queued as
+    // kCueQueueBase + id.
     static constexpr uint8_t kNumberQueueBase = 100;
+    static constexpr uint8_t kCueQueueBase = 200;
     QueueHandle_t queue_ = nullptr;
 };
