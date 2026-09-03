@@ -44,9 +44,10 @@ HWCDC USBSerial;
 // ---------------------------------------------------------------------------
 static Arduino_DataBus* bus =
     new Arduino_ESP32QSPI(LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
-static Arduino_GFX* gfx =
+static Arduino_CO5300* amoled =
     new Arduino_CO5300(bus, LCD_RESET, 0 /* rotation */, LCD_WIDTH, LCD_HEIGHT,
                        LCD_COL_OFFSET1, 0, 0, 0);
+static Arduino_GFX* gfx = amoled;  // generic drawing; `amoled` for setBrightness()
 
 // ---------------------------------------------------------------------------
 // Touch: FT3168 on the shared I2C bus (Waveshare Arduino_DriveBus wrapper).
@@ -87,9 +88,21 @@ static volatile int batteryMv = -1;
 static SemaphoreHandle_t trackerMux;        // guards all `tracker` access
 static volatile bool clickPending = false;
 static volatile bool samplingPaused = false;    // true while asleep (or stopping)
-static volatile bool lightSleepReq = false;     // set by a tap on empty screen area
+static volatile bool lightSleepReq = false;     // set by a double background-tap
 static volatile bool deepSleepReq = false;      // set by the Stop button
 static uint32_t touchIgnoreUntilMs = 0;         // swallow the light-sleep wake tap
+
+// AMOLED brightness. Full everywhere except the run (Monitoring) screen, which
+// sits dim - the user isn't looking at the watch mid-stroke - and lifts to
+// full for kBrightHoldMs after any tap. A double background-tap on the run
+// screen goes to light sleep (see ui::onTap). All touched from the loop
+// thread only.
+static constexpr uint8_t  kBrightFull   = 0xD0;   // CO5300 init value
+static constexpr uint8_t  kBrightDim    = 0x50;
+static constexpr uint32_t kBrightHoldMs = 5000;
+static constexpr uint32_t kDoubleTapMs  = 400;
+static uint32_t lastTapMs   = 0;   // any touch, set in touchRead()
+static uint32_t lastBgTapMs = 0;   // background clicks only, for double-tap
 
 // LVGL draw buffer (partial mode). 100 lines so the tallest dynamic element
 // (the montserrat-48 angle label, a fixed 70 px box - see ui.cpp) always
@@ -124,6 +137,7 @@ static void touchRead(lv_indev_t*, lv_indev_data_t* data) {
     data->point.y = touch->IIC_Read_Device_Value(
         touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
     data->state = LV_INDEV_STATE_PRESSED;
+    lastTapMs = millis();  // any tap lifts the run screen to full brightness
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +181,7 @@ static void samplingTask(void*) {
 }
 
 // ---------------------------------------------------------------------------
-// Tap on empty screen area -> light sleep. Display off, amp off, both cores
+// Double background-tap -> light sleep. Display off, amp off, both cores
 // halted; a screen touch (FT3168 INT low) or the BOOT button wakes it and it
 // resumes exactly where it left off - RAM is retained through light sleep, so
 // SwingTracker state survives.
@@ -199,6 +213,7 @@ static void enterLightSleep() {
     gpio_wakeup_disable((gpio_num_t)BTN_BOOT);
 
     gfx->displayOn();
+    amoled->setBrightness(kBrightFull);  // WRDISBV persisted across sleep at whatever it was
     gfx->fillScreen(BLACK);
     // Amp stays off; the next loop() iteration re-enables it if we woke back
     // into the run state.
@@ -206,6 +221,7 @@ static void enterLightSleep() {
 
     touch->IIC_Interrupt_Flag = false;
     touchIgnoreUntilMs = millis() + 400;  // don't let the wake tap hit a button
+    lastTapMs = millis();                 // wake bright, then dim after the hold
     samplingPaused = false;
     USBSerial.println("woke from light sleep");
 }
@@ -237,15 +253,19 @@ static void enterDeepSleep() {
 
 // ---------------------------------------------------------------------------
 static void wireUiHooks() {
-    // A tap that isn't on a button: start calibration from the idle screen,
-    // otherwise drop into light sleep.
+    // A tap that isn't on a button: start calibration from the idle screen;
+    // on the run screen a double-tap drops into light sleep (a single tap just
+    // wakes the dimmed screen, handled in touchRead).
     ui::onTap = [] {
         xSemaphoreTake(trackerMux, portMAX_DELAY);
         SwingTracker::State st = tracker.state();
         if (st == SwingTracker::State::WaitingForCalibration) tracker.tap();
         xSemaphoreGive(trackerMux);
-        if (st == SwingTracker::State::Monitoring || st == SwingTracker::State::Done)
-            lightSleepReq = true;
+        if (st == SwingTracker::State::Monitoring || st == SwingTracker::State::Done) {
+            uint32_t now = millis();
+            if (now - lastBgTapMs < kDoubleTapMs) lightSleepReq = true;
+            lastBgTapMs = now;
+        }
     };
     ui::onRecal = [] {
         xSemaphoreTake(trackerMux, portMAX_DELAY);
@@ -436,6 +456,18 @@ void loop() {
                 setCpuFrequencyMhz(wantCpuMhz);
                 curCpuMhz = wantCpuMhz;
                 USBSerial.printf("cpu -> %u MHz\n", (unsigned)getCpuFrequencyMhz());
+            }
+
+            // Power: the run screen sits at kBrightDim, rising to kBrightFull
+            // for kBrightHoldMs after a tap. Everything else is full.
+            bool runScreen = snap.state == SwingTracker::State::Monitoring;
+            uint8_t wantBright = (!runScreen || millis() - lastTapMs < kBrightHoldMs)
+                                     ? kBrightFull
+                                     : kBrightDim;
+            static uint8_t curBright = kBrightFull;
+            if (wantBright != curBright) {
+                curBright = wantBright;
+                amoled->setBrightness(curBright);
             }
         }
     }
