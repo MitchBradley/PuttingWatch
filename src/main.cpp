@@ -86,23 +86,28 @@ static volatile int batteryPct = -1;  // updated from loop() every few seconds
 static volatile int batteryMv = -1;
 
 static SemaphoreHandle_t trackerMux;        // guards all `tracker` access
-static volatile bool clickPending = false;
 static volatile bool samplingPaused = false;    // true while asleep (or stopping)
 static volatile bool lightSleepReq = false;     // set by a double background-tap
 static volatile bool deepSleepReq = false;      // set by the Stop button
 static uint32_t touchIgnoreUntilMs = 0;         // swallow the light-sleep wake tap
 
-// AMOLED brightness. Full everywhere except the run (Monitoring) screen, which
-// sits dim - the user isn't looking at the watch mid-stroke - and lifts to
-// full for kBrightHoldMs after any tap. A double background-tap on the run
-// screen goes to light sleep (see ui::onTap). All touched from the loop
-// thread only.
-static constexpr uint8_t  kBrightFull   = 0xD0;   // CO5300 init value
-static constexpr uint8_t  kBrightDim    = 0x50;
-static constexpr uint32_t kBrightHoldMs = 5000;
-static constexpr uint32_t kDoubleTapMs  = 400;
-static uint32_t lastTapMs   = 0;   // any touch, set in touchRead()
-static uint32_t lastBgTapMs = 0;   // background clicks only, for double-tap
+// AMOLED power. On the run (Monitoring) screen the panel is blanked (DISPOFF)
+// while idle - you're watching the ball, not the watch. While blanked, loop()
+// runs its lean blankedLoop() path: no LVGL, no rendering, just a wake-tap
+// poll and the re-arm cue, with a longer delay so core 1 mostly idles. Any
+// tap wakes it (full brightness for kBrightHoldMs); the wake tap is swallowed
+// so it can't blind-press a control. Other screens stay on. A double
+// background-tap on the run screen goes to light sleep (ui::onTap). All state
+// here is touched from the loop thread only.
+static constexpr uint8_t  kBrightFull     = 0xD0;  // CO5300 init value
+static constexpr uint32_t kBrightHoldMs   = 5000;
+static constexpr uint32_t kWakeSwallowMs  = 400;   // ignore touches this long after a wake
+static constexpr uint32_t kDoubleTapMs    = 400;
+static constexpr uint32_t kBlankedLoopMs  = 25;    // core-1 loop period while blanked
+static uint32_t lastTapMs        = 0;   // any touch, set in touchRead() / blankedLoop()
+static uint32_t lastBgTapMs      = 0;   // background clicks only, for double-tap
+static bool     runScreenBlanked = false;
+static bool     lastReady        = false;  // ready-cue edge, maintained in both loop modes
 
 // LVGL draw buffer (partial mode). 100 lines so the tallest dynamic element
 // (the montserrat-48 angle label, a fixed 70 px box - see ui.cpp) always
@@ -137,7 +142,7 @@ static void touchRead(lv_indev_t*, lv_indev_data_t* data) {
     data->point.y = touch->IIC_Read_Device_Value(
         touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
     data->state = LV_INDEV_STATE_PRESSED;
-    lastTapMs = millis();  // any tap lifts the run screen to full brightness
+    lastTapMs = millis();  // hold the run screen on / re-arm the 5 s
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +218,8 @@ static void enterLightSleep() {
     gpio_wakeup_disable((gpio_num_t)BTN_BOOT);
 
     gfx->displayOn();
-    amoled->setBrightness(kBrightFull);  // WRDISBV persisted across sleep at whatever it was
+    amoled->setBrightness(kBrightFull);
+    runScreenBlanked = false;  // displayOn() fully re-enabled the panel
     gfx->fillScreen(BLACK);
     // Amp stays off; the next loop() iteration re-enables it if we woke back
     // into the run state.
@@ -353,15 +359,80 @@ void setup() {
 
     if (!clicker.begin()) USBSerial.println("Clicker/ES8311 init failed - audio disabled");
 
-    // --- Model callbacks (run inside tracker.update, already under the mutex -
-    // just raise a flag, do the I/O from loop()). ---
-    tracker.onClick = [] { clickPending = true; };
+    // --- Model callbacks (run inside tracker.update on core 0, under the
+    // tracker mutex). playClick() is just a non-blocking queue send to the
+    // audio task, so fire it straight from here - the click stays tight to
+    // the stroke regardless of what the core-1 loop() is doing. ---
+    tracker.onClick = [] { clicker.playClick(); };
     // No calibration-complete cue here: the click interval is spoken from
     // loop() when the main (Monitoring) screen first appears - see below.
 
     xTaskCreatePinnedToCore(samplingTask, "sampling", 4096, nullptr, 2, nullptr, 0);
 
     USBSerial.printf("setup done (imu=%d)\n", imuOk);
+}
+
+// AXP2101 battery voltage -> EMA-smoothed mV / % (the chip's own fuel-gauge %
+// is unusable on this board). Every 5 s, and once on the first call.
+static void pollBattery() {
+    static uint32_t last = 0;
+    if (last && millis() - last < 5000) return;
+    last = millis();
+    int mv = battery.millivolts();
+    if (mv <= 0) return;
+    static int emaMv = 0;
+    emaMv = (emaMv == 0) ? mv : emaMv + (mv - emaMv) / 3;
+    batteryMv = emaMv;
+    batteryPct = Battery::percentForMillivolts(emaMv);
+}
+
+// One diagnostic line per second.
+static void serialLog() {
+    static uint32_t last = 0;
+    if (!USBSerial || millis() - last < 1000) return;
+    last = millis();
+    USBSerial.printf("state=%d phase=%d ready=%d angle=%.1f clicks=%d batt=%d%% %d mV heap=%u\n",
+                     (int)tracker.state(), (int)tracker.swingPhase(), tracker.isReadyForSwing(),
+                     tracker.swingAngleDegrees(), tracker.clickCount(), batteryPct, batteryMv,
+                     (unsigned)ESP.getFreeHeap());
+}
+
+// Un-blank the run screen: DISPON, last frame is still in GRAM, force a
+// repaint, and hand control back to the normal loop() path.
+static void wakeRunScreen() {
+    bus->sendCommand(CO5300_C_DISPON);
+    amoled->setBrightness(kBrightFull);
+    lv_obj_invalidate(lv_screen_active());
+    runScreenBlanked = false;
+}
+
+// Lean loop path while the run screen is blanked: no LVGL, no rendering. The
+// 100 Hz sampling and the click audio run on core 0 regardless; here we only
+// poll for a wake tap and keep the re-arm cue going, then sleep kBlankedLoopMs
+// so core 1 mostly sits in waiti.
+static void blankedLoop() {
+    // Wake tap: any FT3168 touch past the swallow window lights the screen.
+    // The touch is consumed here (swallow window) so it can't blind-press a
+    // control; a deliberate follow-up tap does.
+    if (touch->IIC_Interrupt_Flag && (int32_t)(millis() - touchIgnoreUntilMs) >= 0) {
+        touch->IIC_Interrupt_Flag = false;
+        lastTapMs = millis();
+        touchIgnoreUntilMs = millis() + kWakeSwallowMs;
+        wakeRunScreen();
+    }
+
+    if (xSemaphoreTake(trackerMux, pdMS_TO_TICKS(5)) == pdTRUE) {
+        bool ready = tracker.isReadyForSwing();
+        bool inRun = tracker.state() == SwingTracker::State::Monitoring;
+        xSemaphoreGive(trackerMux);
+        if (ready && !lastReady) clicker.playCue(CUE_READY);
+        lastReady = ready;
+        if (!inRun) wakeRunScreen();  // defensive: can't happen without a tap
+    }
+
+    pollBattery();
+    serialLog();
+    delay(kBlankedLoopMs);
 }
 
 void loop() {
@@ -371,33 +442,18 @@ void loop() {
         enterLightSleep();
     }
 
-    lv_timer_handler();
-
-    if (clickPending) { clickPending = false; clicker.playClick(); }
-    clicker.tick();
-
-    // Battery: poll the AXP2101 voltage every 5 s (and once on the first
-    // loop), EMA-smooth it, and derive % from a LiPo voltage curve - the
-    // chip's own fuel-gauge % is unusable on this board.
-    static uint32_t lastBatt = 0;
-    if (lastBatt == 0 || millis() - lastBatt >= 5000) {
-        lastBatt = millis();
-        int mv = battery.millivolts();
-        if (mv > 0) {
-            static int emaMv = 0;
-            emaMv = (emaMv == 0) ? mv : emaMv + (mv - emaMv) / 3;
-            batteryMv = emaMv;
-            batteryPct = Battery::percentForMillivolts(emaMv);
-        }
+    if (runScreenBlanked) {
+        blankedLoop();
+        return;
     }
 
-    // Snapshot the Model at ~20 Hz for the view. Cheap now that ui::render
-    // only pushes what changed (the audio/haptic path is full-rate via the
-    // sampling task, independent of this).
+    lv_timer_handler();
+    pollBattery();
+
+    // Snapshot the Model at ~20 Hz for the view + the audio/power logic.
     static uint32_t lastRender = 0;
-    uint32_t now = millis();
-    if (now - lastRender >= 50) {
-        lastRender = now;
+    if (millis() - lastRender >= 50) {
+        lastRender = millis();
         ui::Snapshot snap;
         if (xSemaphoreTake(trackerMux, pdMS_TO_TICKS(5)) == pdTRUE) {
             snap.state = tracker.state();
@@ -438,7 +494,7 @@ void loop() {
             // armed state - i.e. when re-armed for the next stroke after a
             // putt. Skip the edge that coincides with entering Monitoring;
             // the click-interval announcement above already signals "go".
-            static bool lastReady = false;
+            // (lastReady is a file global - blankedLoop() maintains it too.)
             if (snap.ready && !lastReady && !enteredMonitoring) {
                 clicker.playCue(CUE_READY);
             }
@@ -458,29 +514,19 @@ void loop() {
                 USBSerial.printf("cpu -> %u MHz\n", (unsigned)getCpuFrequencyMhz());
             }
 
-            // Power: the run screen sits at kBrightDim, rising to kBrightFull
-            // for kBrightHoldMs after a tap. Everything else is full.
+            // Power: on the run screen, once kBrightHoldMs has elapsed since
+            // the last tap, blank the panel (DISPOFF - bare command, ~0 OLED
+            // emission, last frame kept in GRAM) and drop into blankedLoop()
+            // next iteration. wakeRunScreen() brings it back on a tap.
             bool runScreen = snap.state == SwingTracker::State::Monitoring;
-            uint8_t wantBright = (!runScreen || millis() - lastTapMs < kBrightHoldMs)
-                                     ? kBrightFull
-                                     : kBrightDim;
-            static uint8_t curBright = kBrightFull;
-            if (wantBright != curBright) {
-                curBright = wantBright;
-                amoled->setBrightness(curBright);
+            if (runScreen && millis() - lastTapMs >= kBrightHoldMs) {
+                bus->sendCommand(CO5300_C_DISPOFF);
+                runScreenBlanked = true;
             }
         }
     }
 
-    static uint32_t lastLog = 0;
-    if (USBSerial && now - lastLog >= 1000) {
-        lastLog = now;
-        USBSerial.printf("state=%d phase=%d ready=%d angle=%.1f clicks=%d batt=%d%% %d mV heap=%u\n",
-                         (int)tracker.state(), (int)tracker.swingPhase(),
-                         tracker.isReadyForSwing(), tracker.swingAngleDegrees(),
-                         tracker.clickCount(), batteryPct, batteryMv,
-                         (unsigned)ESP.getFreeHeap());
-    }
+    serialLog();
 
     // Yield so the idle task on this core runs (feeds the task watchdog) -
     // lv_timer_handler never blocks on its own.
