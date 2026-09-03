@@ -148,7 +148,7 @@ void test_rearm_when_settled_near_original_rest(void) {
     ramp(t, 25.0f, 0.0f, 40, clock);
     TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::ForwardStroke);
 
-    // Hold still back at address: 2 s to end the swing + 2 s stillness -> re-arm.
+    // Hold still back at address: 2 s to end the swing + 1 s stillness -> re-arm.
     hold(t, 0.0f, 450, clock);
     TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::Backswing);
     TEST_ASSERT_TRUE(t.isReadyForSwing());

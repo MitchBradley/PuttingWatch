@@ -40,7 +40,7 @@ class SwingTracker {
         float clickThresholdDegreesMax = 12.0f;
         float reversalDropDegrees = 2.0f;      // drop below peak => forward stroke
         uint32_t endOfSwingDelayMs = 2000;     // forward stroke held this long => recovering
-        uint32_t stillnessDurationMs = 2000;   // continuous still time before re-arm
+        uint32_t stillnessDurationMs = 1000;   // continuous still time before re-arm
         float stillnessToleranceDegrees = 3.0f;   // drift that resets the stillness window
         float restRecenterMaxDriftDegrees = 10.0f; // settled pos must be this near the
                                                    // ORIGINAL calibrated rest to re-center
