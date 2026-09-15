@@ -10,8 +10,16 @@
 #include <Wire.h>
 #include "SensorQMI8658.hpp"
 
-static constexpr int PIN_SDA = 15;
-static constexpr int PIN_SCL = 14;
+// Defaults are the S3 board's touch/IMU I2C pins; the C6 board wires the
+// same bus to different GPIOs, overridden via build_flags in its env.
+#ifndef PROBE_PIN_SDA
+#define PROBE_PIN_SDA 15
+#endif
+#ifndef PROBE_PIN_SCL
+#define PROBE_PIN_SCL 14
+#endif
+static constexpr int PIN_SDA = PROBE_PIN_SDA;
+static constexpr int PIN_SCL = PROBE_PIN_SCL;
 
 SensorQMI8658 qmi;
 

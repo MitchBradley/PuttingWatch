@@ -237,6 +237,15 @@ static void enterLightSleep() {
 // the BOOT button (GPIO0) and comes back through a full reboot / setup(), so
 // it lands on the "Tap when in putting position" screen. The FT3168 touch INT
 // (GPIO38) is NOT an RTC pad and can't wake deep sleep, hence BOOT only.
+//
+// S3 board only. On the C6 board neither onboard button (BOOT=GPIO9,
+// PWR=GPIO18) is in the RTC/LP-IO range (GPIO0-7), so ext1 deep-sleep wakeup
+// has no button to use, and gpio_deep_sleep_hold_en()/_dis() (the whole-chip
+// pad-hold call this function relies on) don't even exist for C6 - it only
+// has the per-pin gpio_hold_en(), which already latches state through deep
+// sleep on that target with no separate enable call. loop() routes the Stop
+// button to enterPmuShutdown() on C6 instead of here - see that function.
+#if !CONFIG_IDF_TARGET_ESP32C6
 static void enterDeepSleep() {
     USBSerial.println("stop: deep sleep (press BOOT to wake)");
     USBSerial.flush();
@@ -256,6 +265,96 @@ static void enterDeepSleep() {
     esp_sleep_enable_ext1_wakeup(1ULL << BTN_BOOT, ESP_EXT1_WAKEUP_ANY_LOW);
     esp_deep_sleep_start();  // never returns
 }
+#endif  // !CONFIG_IDF_TARGET_ESP32C6
+
+#if CONFIG_IDF_TARGET_ESP32C6
+// Stop button -> AXP2101 PMU shutdown. Per the schematic, this board's PWR
+// key (Key3) pulls the AXP2101's PWRON pin (30) low through a 510R resistor -
+// a real hardware power button, not just another GPIO. XPowersLib's
+// shutdown() writes the PMU's own shutdown bit, which cuts every rail but
+// VRTC, the ESP32's 3V3 supply included: this is genuinely off (well below
+// any ESP32-side sleep mode, which by definition keeps the chip powered),
+// and it's the mechanism this board's hardware was actually built for -
+// unlike deep sleep, which has no RTC/LP-IO wake pin available on this
+// board (see enterDeepSleep()'s comment). Wakes purely in hardware: pressing
+// PWR pulls PWRON low again, the PMU treats that as a power-on request, and
+// the ESP32 does a full cold boot back to setup() - same "lands on
+// WaitingForCalibration" behavior as the S3's deep sleep, just reached via
+// the PMU instead of the SoC's own sleep path.
+static void enterPmuShutdown() {
+    USBSerial.println("stop: PMU shutdown (press PWR to wake)");
+    samplingPaused = true;
+
+    // The run screen may currently be blanked (bare DISPOFF, see
+    // blankedLoop()). DISPOFF doesn't clear GRAM or stop QSPI writes, it
+    // only stops the panel emitting light - so draw the new frame FIRST
+    // (fillScreen, then the Bye screen) and only turn the panel back on
+    // (displayOn(), which also sends SLPOUT - the bare DISPON
+    // wakeRunScreen() uses wasn't reliable here) once GRAM already holds the
+    // right content. Doing it the other way round flashes the stale
+    // run-screen frame that was still sitting in GRAM.
+    bool wasBlanked = runScreenBlanked;
+    if (wasBlanked) {
+        gfx->fillScreen(BLACK);
+    }
+
+    // Visible feedback that the press registered, since the PMU rail-cut
+    // that follows gives no other sign anything happened. Forces its own
+    // flush (lv_refr_now), so it's on screen even though loop()'s normal
+    // ~20 Hz render won't run again before displayOff(). Safe to call
+    // whether or not the panel is currently on.
+    ui::showByeScreen();
+
+    if (wasBlanked) {
+        gfx->displayOn();
+        amoled->setBrightness(kBrightFull);
+        runScreenBlanked = false;
+    }
+
+    delay(600);
+
+    USBSerial.flush();
+    delay(20);
+    gfx->displayOff();
+    clicker.setAmpEnabled(false);
+
+    if (battery.ok()) {
+        battery.shutdown();  // rails drop here - nothing below this line runs
+    }
+
+    // Only reached if the PMU never initialised (see setup()'s "AXP2101
+    // begin failed" case) - don't strand the user with a dead Stop button.
+    USBSerial.println("PMU shutdown unavailable (AXP2101 not initialised) - falling back to light sleep");
+    samplingPaused = false;
+    enterLightSleep();
+}
+
+// BOOT button while awake: a press triggers the same graceful shutdown as
+// tapping the on-screen Stop button (see enterPmuShutdown()). PWR (GPIO18)
+// was the original plan - pulling PWRON low doubles as a MOSFET-inverted
+// GPIO18 read per the schematic - but on-device that pin never showed a
+// level change when pressed (verified by swapping this same poll to GPIO9,
+// which worked immediately), so BOOT does the job instead. PWR still wakes
+// the watch from the PMU-shutdown state via PWRON - that path is pure
+// hardware and doesn't involve this code at all.
+//
+// Idle HIGH (INPUT_PULLUP, set in setup()), pulled LOW when pressed.
+// Debounced by a minimum gap between triggers, not a hold timer - a
+// mechanical button bouncing on one press is the only thing being filtered,
+// and polling at loop()'s ~50 Hz (or blankedLoop()'s ~40 Hz) is already slow
+// enough that a real bounce can't retrigger past it.
+static bool bootBtnWasPressed = false;
+static uint32_t bootBtnLastTriggerMs = 0;
+static void checkBootShutdownButton() {
+    bool pressed = digitalRead(BTN_BOOT) == LOW;
+    if (pressed && !bootBtnWasPressed && millis() - bootBtnLastTriggerMs > 500) {
+        bootBtnLastTriggerMs = millis();
+        deepSleepReq = true;
+        USBSerial.println("BOOT button press -> requesting shutdown");
+    }
+    bootBtnWasPressed = pressed;
+}
+#endif  // CONFIG_IDF_TARGET_ESP32C6
 
 // ---------------------------------------------------------------------------
 static void wireUiHooks() {
@@ -313,7 +412,9 @@ void setup() {
     // Release any pad holds left latched by a prior deep sleep (see
     // enterDeepSleep) before anything reconfigures those pins.
     gpio_hold_dis((gpio_num_t)PA_CTRL);
+#if !CONFIG_IDF_TARGET_ESP32C6
     gpio_deep_sleep_hold_dis();
+#endif
 
     trackerMux = xSemaphoreCreateMutex();
 
@@ -322,7 +423,9 @@ void setup() {
 
     Wire.begin(IIC_SDA, IIC_SCL, 400000);
 
-    pinMode(BTN_BOOT, INPUT_PULLUP);  // also a wake source out of light sleep
+    // Also the wake source out of light sleep, and (C6) the awake-shutdown
+    // trigger polled by checkBootShutdownButton().
+    pinMode(BTN_BOOT, INPUT_PULLUP);
 
     if (!touch->begin()) USBSerial.println("FT3168 begin failed");
     // The hardware reset in touch->begin() can leave the FT3168's INT
@@ -411,6 +514,10 @@ static void wakeRunScreen() {
 // poll for a wake tap and keep the re-arm cue going, then sleep kBlankedLoopMs
 // so core 1 mostly sits in waiti.
 static void blankedLoop() {
+#if CONFIG_IDF_TARGET_ESP32C6
+    checkBootShutdownButton();
+#endif
+
     // Wake tap: any FT3168 touch past the swallow window lights the screen.
     // The touch is consumed here (swallow window) so it can't blind-press a
     // control; a deliberate follow-up tap does.
@@ -436,7 +543,18 @@ static void blankedLoop() {
 }
 
 void loop() {
-    if (deepSleepReq) enterDeepSleep();  // never returns
+#if CONFIG_IDF_TARGET_ESP32C6
+    checkBootShutdownButton();
+#endif
+
+    if (deepSleepReq) {
+#if CONFIG_IDF_TARGET_ESP32C6
+        deepSleepReq = false;
+        enterPmuShutdown();  // never returns unless the PMU never initialised
+#else
+        enterDeepSleep();  // never returns
+#endif
+    }
     if (lightSleepReq) {
         lightSleepReq = false;
         enterLightSleep();
@@ -506,8 +624,9 @@ void loop() {
             // 80 MHz keeps the same 80 MHz APB clock so I2C/I2S/timers are
             // unaffected. Full speed elsewhere (boot, the image-heavy waiting
             // screen, calibration).
-            static uint32_t curCpuMhz = 240;
-            uint32_t wantCpuMhz = (snap.state == SwingTracker::State::Monitoring) ? 80 : 240;
+            static uint32_t curCpuMhz = CPU_MHZ_FULL;
+            uint32_t wantCpuMhz =
+                (snap.state == SwingTracker::State::Monitoring) ? CPU_MHZ_RUN : CPU_MHZ_FULL;
             if (wantCpuMhz != curCpuMhz) {
                 setCpuFrequencyMhz(wantCpuMhz);
                 curCpuMhz = wantCpuMhz;

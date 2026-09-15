@@ -27,6 +27,11 @@ int Battery::millivolts() {
     return (int)pmu.getBattVoltage();
 }
 
+void Battery::shutdown() {
+    if (!ok_) return;
+    pmu.shutdown();
+}
+
 int Battery::percentForMillivolts(int mv) {
     if (mv <= 0) return -1;
     if (mv >= kCurve[0].mv) return 100;

@@ -2,7 +2,8 @@
 #include <Wire.h>
 
 // Thin wrapper over the AXP2101 PMU (lewisxhe/XPowersLib) for a battery
-// readout. Read-only: it never touches a power rail.
+// readout, plus (on boards that wire a button to PWRON) the one write that
+// does touch a power rail: shutdown().
 //
 // The AXP2101's own fuel-gauge percentage (getBatteryPercent) proved
 // worthless on this board - it read 30% at 4.19 V - so we ignore it and
@@ -20,6 +21,13 @@ class Battery {
     // mv <= 0. Note: terminal voltage sags under load, so this reads a few
     // points low while the display is drawing and recovers when it idles.
     static int percentForMillivolts(int mv);
+
+    // Tell the AXP2101 to cut every rail but VRTC - the ESP32's own supply
+    // included. Does not return: the MCU loses power before the call site's
+    // next line runs. Only the PMU's own PWRON pin (a physical button wired
+    // to it in hardware, board-dependent) can bring the rails back, which
+    // then looks like a normal cold boot. Call only when ok().
+    void shutdown();
 
     bool ok() const { return ok_; }
 

@@ -29,6 +29,7 @@ lv_obj_t* battBar = nullptr;
 lv_obj_t* battLabel = nullptr;
 lv_obj_t* minusBtn = nullptr;
 lv_obj_t* plusBtn = nullptr;
+lv_obj_t* byeLabel = nullptr;
 
 // Background colours, matching ContentView.swift's palette intent.
 constexpr uint32_t kBgWaiting = 0xFFFFFF;   // white - behind the Honu image
@@ -167,6 +168,35 @@ void init() {
     lv_obj_set_size(threshLabel, LCD_WIDTH, 64);
     lv_obj_set_style_text_align(threshLabel, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(threshLabel, LV_ALIGN_CENTER, 0, 74);
+
+    byeLabel = lv_label_create(root);
+    lv_obj_set_style_text_font(byeLabel, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(byeLabel, lv_color_white(), 0);
+    lv_obj_set_size(byeLabel, LCD_WIDTH, 70);
+    lv_obj_set_style_text_align(byeLabel, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(byeLabel, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(byeLabel, "Bye");
+    lv_obj_add_flag(byeLabel, LV_OBJ_FLAG_HIDDEN);
+}
+
+void showByeScreen() {
+    lv_obj_set_style_bg_color(root, lv_color_hex(kBgIdleDark), LV_PART_MAIN);
+    setHidden(honuImg, true);
+    setHidden(honuBottomImg, true);
+    setHidden(waitLabel, true);
+    setHidden(statusLabel, true);
+    setHidden(bigLabel, true);
+    setHidden(threshLabel, true);
+    setHidden(recalBtn, true);
+    setHidden(stopBtn, true);
+    setHidden(battBar, true);
+    setHidden(battLabel, true);
+    setHidden(minusBtn, true);
+    setHidden(plusBtn, true);
+    setHidden(byeLabel, false);
+    lv_obj_move_foreground(byeLabel);
+    lv_refr_now(nullptr);  // force the flush now - normal render() cadence
+                            // (~20 Hz) may not get another chance to run
 }
 
 // render() is called ~20x/s. It MUST only touch an LVGL object when that

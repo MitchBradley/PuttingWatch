@@ -24,6 +24,13 @@ struct Snapshot {
 void init();
 void render(const Snapshot& s);
 
+// Full-screen "Bye", replacing whatever's on screen, with an immediate
+// forced flush (bypasses the normal ~20 Hz render cadence) so it's actually
+// visible even when the caller powers off a few milliseconds later. For a
+// shutdown path right before the display goes dark - not part of the normal
+// state-driven render() flow.
+void showByeScreen();
+
 // Raised by the view; wired to the tracker in main.
 extern std::function<void()> onTap;                    // screen tapped (start calibration)
 extern std::function<void()> onRecal;
