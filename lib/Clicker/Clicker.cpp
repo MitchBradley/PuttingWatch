@@ -60,6 +60,29 @@ void Clicker::renderTone(int16_t* dst, int nFrames, float freqHz, float amp, int
     }
 }
 
+// Square wave, frequency swept linearly from freqStartHz to freqEndHz over
+// the buffer, with the same raised-cosine attack/release as renderTone() so
+// it doesn't pop. Phase is the integral of instantaneous frequency (not
+// just freq*t, which would be wrong for anything but a constant frequency):
+// f(t) = f0 + (f1-f0)*t/T  =>  phase(t) = 2*pi*(f0*t + (f1-f0)*t^2/(2T)).
+void Clicker::renderChirpSquare(int16_t* dst, int nFrames, float freqStartHz, float freqEndHz,
+                                float amp, int rampFrames) {
+    const float durationS = (float)nFrames / kSampleRate;
+    for (int i = 0; i < nFrames; i++) {
+        float env = 1.0f;
+        if (i < rampFrames) env = 0.5f - 0.5f * cosf((float)M_PI * i / rampFrames);
+        else if (i > nFrames - rampFrames)
+            env = 0.5f - 0.5f * cosf((float)M_PI * (nFrames - i) / rampFrames);
+        const float t = (float)i / kSampleRate;
+        const float phase = 2.0f * (float)M_PI *
+                            (freqStartHz * t + (freqEndHz - freqStartHz) * t * t / (2.0f * durationS));
+        const float sq = sinf(phase) >= 0.0f ? 1.0f : -1.0f;
+        int16_t s = clampSample(sq * env * amp * 32767.0f);
+        dst[2 * i] = s;      // L
+        dst[2 * i + 1] = s;  // R
+    }
+}
+
 // Stream a mono 16 kHz PCM sample out of the stereo I2S port, duplicating
 // each frame L/R, in stereoScratch_-sized chunks. gain > 1.0 hard-clips.
 void Clicker::streamMono(const int16_t* data, int frames, float gain) {
@@ -91,7 +114,7 @@ bool Clicker::begin() {
     }
 
     clickFrames_ = kSampleRate * kClickMs / 1000;
-    tickFrames_ = clickFrames_;
+    tickFrames_ = kSampleRate * kTickMs / 1000;
     beepFrames_ = kSampleRate * kBeepMs / 1000;
     clickBuf_ = (int16_t*)malloc(clickFrames_ * 2 * sizeof(int16_t));
     tickBuf_ = (int16_t*)malloc(tickFrames_ * 2 * sizeof(int16_t));
@@ -100,7 +123,10 @@ bool Clicker::begin() {
     if (!clickBuf_ || !tickBuf_ || !beepBuf_ || !stereoScratch_) return false;
 
     const int ramp = kSampleRate * 2 / 1000;  // 2 ms
-    renderTone(clickBuf_, clickFrames_, kClickHz, kClickAmp, ramp);
+    renderChirpSquare(clickBuf_, clickFrames_, kClickChirpStartHz, kClickChirpEndHz, 1.0f, ramp);
+    // EXPERIMENT (previous): plain sine click - restore this (and kClickHz/
+    // kClickAmp go back to driving it) if the chirp doesn't pan out.
+    // renderTone(clickBuf_, clickFrames_, kClickHz, kClickAmp, ramp);
     renderTone(tickBuf_, tickFrames_, kTickHz, 0.6f, ramp);
     renderTone(beepBuf_, beepFrames_, kBeepHz, 0.5f, ramp);
 

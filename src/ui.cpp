@@ -13,7 +13,6 @@ std::function<void()> onTap;
 std::function<void()> onRecal;
 std::function<void()> onStop;
 std::function<void(int)> onAdjustClickThreshold;
-std::function<void()> onToggleExperimentalMode;
 
 namespace {
 
@@ -31,8 +30,6 @@ lv_obj_t* battLabel = nullptr;
 lv_obj_t* minusBtn = nullptr;
 lv_obj_t* plusBtn = nullptr;
 lv_obj_t* byeLabel = nullptr;
-lv_obj_t* expBtn = nullptr;
-lv_obj_t* expBtnLabel = nullptr;
 
 // Background colours, matching ContentView.swift's palette intent.
 constexpr uint32_t kBgWaiting = 0xFFFFFF;   // white - behind the Honu image
@@ -54,9 +51,6 @@ void minusClicked(lv_event_t*) {
 }
 void plusClicked(lv_event_t*) {
     if (onAdjustClickThreshold) onAdjustClickThreshold(+1);
-}
-void expClicked(lv_event_t*) {
-    if (onToggleExperimentalMode) onToggleExperimentalMode();
 }
 
 void setHidden(lv_obj_t* o, bool hidden) {
@@ -147,24 +141,6 @@ void init() {
     lv_obj_add_flag(minusBtn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(plusBtn, LV_OBJ_FLAG_HIDDEN);
 
-    // Experimental-sensing toggle, right edge. Own label pointer (unlike
-    // makeButton()'s buttons) because render() needs to change its text/color
-    // live to show which mode is active. Modest height (<= the draw buffer's
-    // 100-line tile - see main.cpp's kBufLines comment) so a toggle can't
-    // straddle two QSPI pushes and tear; it changes rarely (a deliberate tap)
-    // so that's mostly moot anyway, but no reason to risk it.
-    expBtn = lv_button_create(root);
-    lv_obj_set_size(expBtn, 72, 90);
-    lv_obj_set_ext_click_area(expBtn, 24);
-    lv_obj_set_style_radius(expBtn, 14, 0);
-    lv_obj_align(expBtn, LV_ALIGN_RIGHT_MID, -10, 0);
-    lv_obj_add_event_cb(expBtn, expClicked, LV_EVENT_CLICKED, nullptr);
-    expBtnLabel = lv_label_create(expBtn);
-    lv_obj_set_style_text_font(expBtnLabel, &lv_font_montserrat_24, 0);
-    lv_label_set_text(expBtnLabel, "N");
-    lv_obj_center(expBtnLabel);
-    lv_obj_add_flag(expBtn, LV_OBJ_FLAG_HIDDEN);
-
     // Every dynamic label gets a FIXED box (full width, fixed height, fixed
     // position) with the text centred inside it - see the note in render():
     // an auto-sized label re-invalidates a moving region and tears.
@@ -217,7 +193,6 @@ void showByeScreen() {
     setHidden(battLabel, true);
     setHidden(minusBtn, true);
     setHidden(plusBtn, true);
-    setHidden(expBtn, true);
     setHidden(byeLabel, false);
     lv_obj_move_foreground(byeLabel);
     lv_refr_now(nullptr);  // force the flush now - normal render() cadence
@@ -240,7 +215,6 @@ void render(const Snapshot& s) {
     static int lastVis = -1;
     static int lastBatt = -2;
     static int lastBattMv = -2;
-    static int lastExp = -1;
 
     char status[48] = "";
     char wait[48] = "";
@@ -328,16 +302,6 @@ void render(const Snapshot& s) {
         lv_label_set_text(battLabel, b);
     }
 
-    if (showNudge && (int)s.experimentalMode != lastExp) {
-        lastExp = (int)s.experimentalMode;
-        // Label names whichever axes are currently INCLUDED (see
-        // SwingTracker::processMonitoringSample - currently X/Y, Z excluded;
-        // keep this in sync if that experiment changes again).
-        lv_label_set_text(expBtnLabel, s.experimentalMode ? "XY" : "N");
-        lv_obj_set_style_bg_color(expBtn, lv_color_hex(s.experimentalMode ? 0xCC6600 : 0x333333),
-                                  LV_PART_MAIN);
-    }
-
     int vis = (showBig ? 1 : 0) | (showThresh ? 2 : 0) | (showTopBtns ? 4 : 0) |
               (showNudge ? 8 : 0) | (showWait ? 16 : 0) | (showBottom ? 32 : 0);
     if (vis != lastVis) {
@@ -354,7 +318,6 @@ void render(const Snapshot& s) {
         setHidden(battLabel, !showTopBtns);
         setHidden(minusBtn, !showNudge);
         setHidden(plusBtn, !showNudge);
-        setHidden(expBtn, !showNudge);
     }
 }
 

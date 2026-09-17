@@ -40,59 +40,6 @@ static void ramp(SwingTracker& t, float fromDeg, float toDeg, int count, uint32_
     }
 }
 
-// EXPERIMENT (previous): ignore Y (forearm/wrist roll) instead of Z - see
-// SwingTracker.cpp. Restore alongside that commented block to go back.
-// Gravity unit vector rotated `deg` about Y from the rest vector (0,0,1) -
-// simulates pure forearm/wrist roll, no X/Z tilt at all. y stays 0
-// throughout, so angleBetweenDegrees(g, rest) == deg exactly too (rotating
-// about Y from a vector already at 90 deg to Y moves it just like rotating
-// about X does from the same start) - the ONLY thing that distinguishes it
-// from sampleAtTilt() is which axis actually moved, which is exactly what
-// experimental mode is supposed to tell apart.
-// static MotionSample sampleAtYRotation(float deg, uint32_t t_ms) {
-//     float r = deg * 3.14159265f / 180.0f;
-//     MotionSample s;
-//     s.t_ms = t_ms;
-//     s.gravity[0] = std::sin(r);
-//     s.gravity[1] = 0.0f;
-//     s.gravity[2] = std::cos(r);
-//     return s;
-// }
-//
-// static void rampY(SwingTracker& t, float fromDeg, float toDeg, int count, uint32_t& clock) {
-//     for (int i = 0; i < count; i++) {
-//         float f = (count > 1) ? float(i) / (count - 1) : 1.0f;
-//         t.update(sampleAtYRotation(fromDeg + (toDeg - fromDeg) * f, clock));
-//         clock += DT_MS;
-//     }
-// }
-
-// Gravity unit vector `restDir` rotated `deg` about Z. Z stays fixed
-// throughout (rotation about Z never changes a vector's Z component), so
-// this is only a meaningful "pure Z rotation" test if restDir itself isn't
-// already sitting on the Z axis (calibrateIntoMonitoring's rest, (0,0,1),
-// IS the Z axis - rotating it about Z wouldn't move it at all, which would
-// trivially "pass" a Z-exclusion test without actually exercising it).
-static MotionSample sampleAtZRotationFrom(const Vec3& restDir, float deg, uint32_t t_ms) {
-    float r = deg * 3.14159265f / 180.0f;
-    float c = std::cos(r), sn = std::sin(r);
-    MotionSample s;
-    s.t_ms = t_ms;
-    s.gravity[0] = restDir.x * c - restDir.y * sn;
-    s.gravity[1] = restDir.x * sn + restDir.y * c;
-    s.gravity[2] = restDir.z;
-    return s;
-}
-
-static void rampZFrom(SwingTracker& t, const Vec3& restDir, float fromDeg, float toDeg, int count,
-                      uint32_t& clock) {
-    for (int i = 0; i < count; i++) {
-        float f = (count > 1) ? float(i) / (count - 1) : 1.0f;
-        t.update(sampleAtZRotationFrom(restDir, fromDeg + (toDeg - fromDeg) * f, clock));
-        clock += DT_MS;
-    }
-}
-
 // Calibrate (tap + hold still) and advance into Monitoring. Leaves the clock
 // just past the point Monitoring began.
 static void calibrateIntoMonitoring(SwingTracker& t, uint32_t& clock) {
@@ -101,30 +48,6 @@ static void calibrateIntoMonitoring(SwingTracker& t, uint32_t& clock) {
     TEST_ASSERT_TRUE(t.state() == SwingTracker::State::Done ||
                      t.state() == SwingTracker::State::Monitoring);
     hold(t, 0.0f, 230, clock);  // 2.3 s more -> Done auto-advances to Monitoring
-    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::Monitoring);
-}
-
-// Same, but calibrates to an arbitrary off-axis rest instead of (0,0,1) -
-// needed to test Z-exclusion meaningfully (see sampleAtZRotationFrom).
-static void calibrateIntoMonitoringAt(SwingTracker& t, const Vec3& restDir, uint32_t& clock) {
-    Vec3 r = restDir.normalized();
-    t.tap();
-    for (int i = 0; i < 260; i++) {
-        MotionSample s;
-        s.t_ms = clock;
-        r.store(s.gravity);
-        t.update(s);
-        clock += DT_MS;
-    }
-    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::Done ||
-                     t.state() == SwingTracker::State::Monitoring);
-    for (int i = 0; i < 230; i++) {
-        MotionSample s;
-        s.t_ms = clock;
-        r.store(s.gravity);
-        t.update(s);
-        clock += DT_MS;
-    }
     TEST_ASSERT_TRUE(t.state() == SwingTracker::State::Monitoring);
 }
 
@@ -268,66 +191,6 @@ void test_click_threshold_clamped(void) {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 7.0f, t.clickThresholdDegrees());
 }
 
-// EXPERIMENT (previous): ignore Y instead of Z - see SwingTracker.cpp.
-// Restore alongside that commented block (and rampY/sampleAtYRotation
-// above) to go back.
-// void test_experimental_mode_ignores_y_rotation(void) {
-//     SwingTracker t;
-//     t.setExperimentalMode(true);
-//     t.setClickThresholdDegrees(6.0f);
-//     uint32_t clock = 0;
-//     calibrateIntoMonitoring(t, clock);
-//
-//     int clicks = 0;
-//     t.onClick = [&] { clicks++; };
-//     rampY(t, 0.0f, 25.0f, 60, clock);   // out
-//     rampY(t, 25.0f, 0.0f, 60, clock);   // and back
-//
-//     TEST_ASSERT_EQUAL_INT(0, clicks);
-//     TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::Backswing);
-//     TEST_ASSERT_TRUE(t.isReadyForSwing());
-// }
-
-// Experimental mode must ignore rotation about Z for click detection - even
-// a swing-sized Z-only rotation should fire nothing and never reverse out of
-// Backswing. Calibrates off-axis (roughly "Z smaller than X/Y", matching the
-// user's playing-position description) since a Z-rotation test needs a rest
-// that isn't already sitting on the Z axis - see sampleAtZRotationFrom.
-void test_experimental_mode_ignores_z_rotation(void) {
-    SwingTracker t;
-    t.setExperimentalMode(true);
-    t.setClickThresholdDegrees(6.0f);
-    uint32_t clock = 0;
-    Vec3 rest(0.6f, 0.6f, 0.53f);
-    calibrateIntoMonitoringAt(t, rest, clock);
-    Vec3 restDir = rest.normalized();
-
-    int clicks = 0;
-    t.onClick = [&] { clicks++; };
-    rampZFrom(t, restDir, 0.0f, 25.0f, 60, clock);  // out
-    rampZFrom(t, restDir, 25.0f, 0.0f, 60, clock);  // and back
-
-    TEST_ASSERT_EQUAL_INT(0, clicks);
-    TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::Backswing);
-    TEST_ASSERT_TRUE(t.isReadyForSwing());
-}
-
-// ... but the identical motion about X (the normal-mode test's own trace)
-// must still click normally in experimental mode - only Z is filtered out.
-void test_experimental_mode_still_clicks_on_xz_rotation(void) {
-    SwingTracker t;
-    t.setExperimentalMode(true);
-    t.setClickThresholdDegrees(6.0f);
-    uint32_t clock = 0;
-    calibrateIntoMonitoring(t, clock);
-
-    int clicks = 0;
-    t.onClick = [&] { clicks++; };
-    ramp(t, 0.0f, 25.0f, 60, clock);  // crossings at 6/12/18/24 -> 4 clicks
-    TEST_ASSERT_EQUAL_INT(4, clicks);
-    TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::Backswing);
-}
-
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_calibration_flow);
@@ -338,7 +201,5 @@ int main(int, char**) {
     RUN_TEST(test_no_rearm_when_settled_far_from_original_rest);
     RUN_TEST(test_recal_resets_everything);
     RUN_TEST(test_click_threshold_clamped);
-    RUN_TEST(test_experimental_mode_ignores_z_rotation);
-    RUN_TEST(test_experimental_mode_still_clicks_on_xz_rotation);
     return UNITY_END();
 }
