@@ -62,6 +62,17 @@ class SwingTracker {
     void setClickThresholdDegrees(float deg);
     float clickThresholdDegrees() const { return clickThresholdDegrees_; }
 
+    // Experimental sensing mode (settable live, e.g. a UI toggle): click
+    // detection - and the peak/reversal tracking it rides on, and the
+    // displayed swingAngleDegrees() - excludes one axis of the gravity
+    // vector; see the comment on processMonitoringSample() for which axis
+    // and why (swapped a few times during on-device experimentation).
+    // Re-arm/stillness detection (isReadyForSwing's path back to Backswing)
+    // is UNAFFECTED either way - it always uses the full 3D tilt, on
+    // purpose.
+    void setExperimentalMode(bool on) { experimentalMode_ = on; }
+    bool experimentalMode() const { return experimentalMode_; }
+
     // --- output ---------------------------------------------------------------
     State state() const { return state_; }
     SwingPhase swingPhase() const { return swingPhase_; }
@@ -92,6 +103,7 @@ class SwingTracker {
     SwingPhase swingPhase_ = SwingPhase::Backswing;
 
     float clickThresholdDegrees_ = 6.0f;
+    bool experimentalMode_ = false;
 
     // --- accumulation ---
     bool accumPending_ = false;    // tap() seen, first Accumulating sample not yet processed

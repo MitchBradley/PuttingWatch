@@ -395,6 +395,16 @@ static void wireUiHooks() {
         xSemaphoreGive(trackerMux);
         if (adjust) clicker.playNumber(nv);  // "four".."twelve"; tone fallback if no samples
     };
+    ui::onToggleExperimentalMode = [] {
+        // Same state gate as the threshold nudge buttons - the button is
+        // only shown on the Monitoring screen anyway, this is just defensive
+        // against a stray touch landing here right after a cold boot.
+        xSemaphoreTake(trackerMux, portMAX_DELAY);
+        if (tracker.state() == SwingTracker::State::Monitoring) {
+            tracker.setExperimentalMode(!tracker.experimentalMode());
+        }
+        xSemaphoreGive(trackerMux);
+    };
 }
 
 void setup() {
@@ -580,6 +590,7 @@ void loop() {
             snap.angleDeg = tracker.swingAngleDegrees();
             snap.clickThresholdDeg = tracker.clickThresholdDegrees();
             snap.clickCount = tracker.clickCount();
+            snap.experimentalMode = tracker.experimentalMode();
             tracker.restGravity().store(snap.restG);
             xSemaphoreGive(trackerMux);
             snap.imuOk = imu.ok();

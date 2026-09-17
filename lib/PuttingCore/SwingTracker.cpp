@@ -87,9 +87,33 @@ void SwingTracker::enterMonitoring() {
 // need to identify which axis the rotation is about, the vector angle
 // captures it directly (the on-the-spot simplification the user made in the
 // Swift version instead of empirical axis detection).
+//
+// Experimental mode replaces that with an angle exactly insensitive to
+// rotation about one axis: rotating a vector about an axis never changes
+// that vector's own angle TO that axis (a basic property of rotation, true
+// regardless of the vector's starting direction), so comparing each
+// vector's angle from the excluded axis - rather than the two vectors'
+// angle from each other - isolates whatever rotation is NOT about it.
 void SwingTracker::processMonitoringSample(const MotionSample& s) {
     const Vec3 g(s.gravity);
-    const float angle = angleBetweenDegrees(g, restGravity_);
+    float angle;
+    if (experimentalMode_) {
+        // EXPERIMENT: ignore Z. In the playing position the gravity vector's
+        // Z component is typically small next to X/Y (mounting-dependent),
+        // so Z carries little swing information there - exclude it entirely
+        // rather than let it dilute the angle with mostly-noise.
+        static const Vec3 kZAxis{0.0f, 0.0f, 1.0f};
+        angle = std::fabs(angleBetweenDegrees(g, kZAxis) -
+                          angleBetweenDegrees(restGravity_, kZAxis));
+
+        // EXPERIMENT (previous): ignore Y (forearm/wrist roll) instead -
+        // restore this block (and comment out the Z one above) to go back.
+        // static const Vec3 kYAxis{0.0f, 1.0f, 0.0f};
+        // angle = std::fabs(angleBetweenDegrees(g, kYAxis) -
+        //                   angleBetweenDegrees(restGravity_, kYAxis));
+    } else {
+        angle = angleBetweenDegrees(g, restGravity_);
+    }
     swingAngleDegrees_ = angle;
 
     switch (swingPhase_) {

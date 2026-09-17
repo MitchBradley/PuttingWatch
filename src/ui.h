@@ -19,6 +19,7 @@ struct Snapshot {
     bool imuOk = true;
     int batteryPct = -1;  // 0..100, -1 = unknown
     int batteryMv = -1;   // terminal voltage, mV, -1 = unknown
+    bool experimentalMode = false;  // SwingTracker::experimentalMode()
 };
 
 void init();
@@ -36,5 +37,6 @@ extern std::function<void()> onTap;                    // screen tapped (start c
 extern std::function<void()> onRecal;
 extern std::function<void()> onStop;
 extern std::function<void(int)> onAdjustClickThreshold;  // -1 / +1 from the bottom buttons
+extern std::function<void()> onToggleExperimentalMode;   // right-edge N/XZ button
 
 }  // namespace ui
