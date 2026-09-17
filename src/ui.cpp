@@ -113,24 +113,24 @@ void init() {
     stopBtn = makeButton("Stop", stopClicked, LV_ALIGN_TOP_MID, 88, 12, 150, 82,
                          &lv_font_montserrat_28);
 
-    // Battery: a plain bar + "NN% NNNN mV" to its right, just below the top
+    // Battery: "NN% NNNN mV" with the bar to its right, just below the top
     // buttons. Shown only when the top buttons are (Monitoring/Done). The
-    // label gets a FIXED box + left-aligned text - an auto-sized label
-    // leaves stale glyph pixels behind on the right when the text shrinks
-    // and tears while it reflows.
-    battBar = lv_bar_create(root);
-    lv_obj_set_size(battBar, 108, 20);
-    lv_bar_set_range(battBar, 0, 100);
-    lv_obj_align(battBar, LV_ALIGN_TOP_MID, -81, 112);
-    lv_obj_set_style_bg_color(battBar, lv_color_hex(0x333333), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(battBar, lv_color_hex(0x33C04D), LV_PART_INDICATOR);
-
+    // label gets a FIXED box + right-aligned text (snug against the bar) -
+    // an auto-sized label leaves stale glyph pixels behind when the text
+    // shrinks and tears while it reflows.
     battLabel = lv_label_create(root);
     lv_obj_set_style_text_font(battLabel, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(battLabel, lv_color_white(), 0);
     lv_obj_set_size(battLabel, 180, 34);  // fits "100% 4200 mV"
-    lv_obj_set_style_text_align(battLabel, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_align_to(battLabel, battBar, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
+    lv_obj_set_style_text_align(battLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(battLabel, LV_ALIGN_TOP_MID, -60, 112);
+
+    battBar = lv_bar_create(root);
+    lv_obj_set_size(battBar, 108, 20);
+    lv_bar_set_range(battBar, 0, 100);
+    lv_obj_align_to(battBar, battLabel, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
+    lv_obj_set_style_bg_color(battBar, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(battBar, lv_color_hex(0x33C04D), LV_PART_INDICATOR);
 
     // Click-interval - / + across the BOTTOM (no slider). Start hidden so an
     // early touch (before the first render sets visibility) can't click them.
