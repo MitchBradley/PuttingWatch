@@ -12,6 +12,15 @@ extern "C" {
 namespace {
 I2SClass i2s;
 
+// Hard-clip to int16 range. Used wherever a gain > 1.0 is applied on
+// purpose (see Clicker::kClickAmp / kReadyCueGain) - an out-of-range float
+// cast straight to int16_t is UB, this makes the clipping explicit instead.
+int16_t clampSample(float v) {
+    if (v > 32767.0f) return 32767;
+    if (v < -32768.0f) return -32768;
+    return (int16_t)v;
+}
+
 // Codec bring-up, modelled on Waveshare's 08_ES8311 example but returning a
 // bool instead of ESP_ERROR_CHECK-aborting, so a missing/miswired codec just
 // disables audio.
@@ -45,20 +54,22 @@ void Clicker::renderTone(int16_t* dst, int nFrames, float freqHz, float amp, int
         if (i < rampFrames) env = 0.5f - 0.5f * cosf((float)M_PI * i / rampFrames);
         else if (i > nFrames - rampFrames)
             env = 0.5f - 0.5f * cosf((float)M_PI * (nFrames - i) / rampFrames);
-        int16_t s = (int16_t)(sinf(w * i) * env * amp * 32767.0f);
+        int16_t s = clampSample(sinf(w * i) * env * amp * 32767.0f);
         dst[2 * i] = s;      // L
         dst[2 * i + 1] = s;  // R
     }
 }
 
 // Stream a mono 16 kHz PCM sample out of the stereo I2S port, duplicating
-// each frame L/R, in stereoScratch_-sized chunks.
-void Clicker::streamMono(const int16_t* data, int frames) {
+// each frame L/R, in stereoScratch_-sized chunks. gain > 1.0 hard-clips.
+void Clicker::streamMono(const int16_t* data, int frames, float gain) {
     for (int off = 0; off < frames; off += kStereoChunkFrames) {
         int n = frames - off;
         if (n > kStereoChunkFrames) n = kStereoChunkFrames;
-        for (int i = 0; i < n; i++)
-            stereoScratch_[2 * i] = stereoScratch_[2 * i + 1] = data[off + i];
+        for (int i = 0; i < n; i++) {
+            int16_t s = (gain == 1.0f) ? data[off + i] : clampSample(data[off + i] * gain);
+            stereoScratch_[2 * i] = stereoScratch_[2 * i + 1] = s;
+        }
         i2s.write((uint8_t*)stereoScratch_, n * 2 * sizeof(int16_t));
     }
 }
@@ -89,7 +100,7 @@ bool Clicker::begin() {
     if (!clickBuf_ || !tickBuf_ || !beepBuf_ || !stereoScratch_) return false;
 
     const int ramp = kSampleRate * 2 / 1000;  // 2 ms
-    renderTone(clickBuf_, clickFrames_, kClickHz, 0.6f, ramp);
+    renderTone(clickBuf_, clickFrames_, kClickHz, kClickAmp, ramp);
     renderTone(tickBuf_, tickFrames_, kTickHz, 0.6f, ramp);
     renderTone(beepBuf_, beepFrames_, kBeepHz, 0.5f, ramp);
 
@@ -156,7 +167,7 @@ void Clicker::audioTask() {
         } else if (item >= kCueQueueBase) {
             int id = item - kCueQueueBase;
             if (id < CUE_COUNT && kCues[id].frames)
-                streamMono(kCues[id].data, kCues[id].frames);
+                streamMono(kCues[id].data, kCues[id].frames, kReadyCueGain);
         } else if (item >= kNumberQueueBase + 1) {
             // Spoken number: stream the mono sample out as stereo in chunks.
             int n = item - kNumberQueueBase;

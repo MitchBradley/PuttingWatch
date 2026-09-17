@@ -33,7 +33,9 @@ class Clicker {
 
   private:
     void renderTone(int16_t* dst, int nFrames, float freqHz, float amp, int rampFrames);
-    void streamMono(const int16_t* data, int frames);  // mono PCM -> stereo I2S, chunked
+    // mono PCM -> stereo I2S, chunked. gain > 1.0 hard-clips (intentional,
+    // for cues that need to be louder than their source sample allows).
+    void streamMono(const int16_t* data, int frames, float gain = 1.0f);
     static void audioTaskThunk(void* self) { static_cast<Clicker*>(self)->audioTask(); }
     void audioTask();
 
@@ -48,6 +50,12 @@ class Clicker {
     static constexpr float kClickHz = 2400.0f;  // motion click
     static constexpr float kTickHz = 1150.0f;   // UI button - ~1 octave lower
     static constexpr float kBeepHz = 880.0f;    // calibration cue
+
+    // Loud on purpose, clipping intentionally - the click (backswing
+    // threshold) and Ready (re-armed) cues need to cut through outdoors, and
+    // being heard matters more than being clean.
+    static constexpr float kClickAmp = 1.6f;     // vs. tick/beep's 0.6/0.5 - unclipped
+    static constexpr float kReadyCueGain = 2.0f;  // digital gain on assets/ready.wav
 
     int16_t* clickBuf_ = nullptr;  // interleaved stereo
     int16_t* tickBuf_ = nullptr;
