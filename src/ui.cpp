@@ -215,6 +215,7 @@ void render(const Snapshot& s) {
     static int lastVis = -1;
     static int lastBatt = -2;
     static int lastBattMv = -2;
+    static int lastBattTextLight = -1;
 
     char status[48] = "";
     char wait[48] = "";
@@ -266,6 +267,13 @@ void render(const Snapshot& s) {
             break;
     }
 
+    // Battery shows on the top-button screens (Monitoring/Done) AND the
+    // initial "Tap when in putting position" screen - the one place besides
+    // Monitoring a golfer is likely to check it before starting. Text is
+    // black there (white background) instead of the usual white.
+    bool showBatt = showTopBtns || s.state == State::WaitingForCalibration;
+    bool battTextLight = s.state == State::WaitingForCalibration;
+
     if (strcmp(status, lastStatus)) {
         strcpy(lastStatus, status);
         lv_label_set_text(statusLabel, status);
@@ -286,7 +294,7 @@ void render(const Snapshot& s) {
         lastBg = bg;
         lv_obj_set_style_bg_color(root, lv_color_hex(bg), LV_PART_MAIN);
     }
-    if (showTopBtns && (s.batteryPct != lastBatt || s.batteryMv != lastBattMv)) {
+    if (showBatt && (s.batteryPct != lastBatt || s.batteryMv != lastBattMv)) {
         lastBatt = s.batteryPct;
         lastBattMv = s.batteryMv;
         int pct = s.batteryPct;
@@ -301,9 +309,15 @@ void render(const Snapshot& s) {
             snprintf(b, sizeof(b), "%d%% %d mV", pct, s.batteryMv);
         lv_label_set_text(battLabel, b);
     }
+    if ((int)battTextLight != lastBattTextLight) {
+        lastBattTextLight = (int)battTextLight;
+        lv_obj_set_style_text_color(battLabel, battTextLight ? lv_color_black() : lv_color_white(),
+                                    0);
+    }
 
     int vis = (showBig ? 1 : 0) | (showThresh ? 2 : 0) | (showTopBtns ? 4 : 0) |
-              (showNudge ? 8 : 0) | (showWait ? 16 : 0) | (showBottom ? 32 : 0);
+              (showNudge ? 8 : 0) | (showWait ? 16 : 0) | (showBottom ? 32 : 0) |
+              (showBatt ? 64 : 0);
     if (vis != lastVis) {
         lastVis = vis;
         setHidden(honuImg, !showWait || showBottom);
@@ -314,8 +328,8 @@ void render(const Snapshot& s) {
         setHidden(threshLabel, !showThresh);
         setHidden(recalBtn, !showTopBtns);
         setHidden(stopBtn, !showTopBtns);
-        setHidden(battBar, !showTopBtns);
-        setHidden(battLabel, !showTopBtns);
+        setHidden(battBar, !showBatt);
+        setHidden(battLabel, !showBatt);
         setHidden(minusBtn, !showNudge);
         setHidden(plusBtn, !showNudge);
     }
