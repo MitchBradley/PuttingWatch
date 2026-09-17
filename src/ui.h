@@ -13,7 +13,7 @@ struct Snapshot {
     SwingTracker::SwingPhase phase = SwingTracker::SwingPhase::Backswing;
     bool ready = false;
     float angleDeg = 0.0f;
-    float clickThresholdDeg = 6.0f;
+    int clickLevel = 3;  // user-facing 1..10 "sensitivity" - see main.cpp's levelForDegrees()
     int clickCount = 0;
     float restG[3] = {0, 0, 0};
     bool imuOk = true;

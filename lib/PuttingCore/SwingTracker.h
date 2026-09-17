@@ -36,8 +36,12 @@ class SwingTracker {
     struct Config {
         uint32_t accumulationMs = 2000;    // hold-still averaging window
         uint32_t monitoringDelayMs = 2000; // Done -> Monitoring auto-advance
-        float clickThresholdDegreesMin = 2.0f;
-        float clickThresholdDegreesMax = 12.0f;
+        // Matches the UI's 1..10 "sensitivity level" mapping (main.cpp:
+        // kLevelBaseDegrees=3.5, kLevelStepDegrees=1.2) - level 1 and level
+        // 10 respectively. Keep in sync if that mapping changes; this class
+        // only ever reasons in degrees, the level is purely a UI concept.
+        float clickThresholdDegreesMin = 3.5f;
+        float clickThresholdDegreesMax = 14.3f;
         float reversalDropDegrees = 2.0f;      // drop below peak => forward stroke
         uint32_t endOfSwingDelayMs = 2000;     // forward stroke held this long => recovering
         uint32_t stillnessDurationMs = 1000;   // continuous still time before re-arm
@@ -91,7 +95,7 @@ class SwingTracker {
     State state_ = State::WaitingForCalibration;
     SwingPhase swingPhase_ = SwingPhase::Backswing;
 
-    float clickThresholdDegrees_ = 6.0f;
+    float clickThresholdDegrees_ = 5.9f;  // level 3 (3.5 + 2*1.2) - see Config's min/max comment
 
     // --- accumulation ---
     bool accumPending_ = false;    // tap() seen, first Accumulating sample not yet processed

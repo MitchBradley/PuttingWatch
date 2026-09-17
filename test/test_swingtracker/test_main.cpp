@@ -184,9 +184,9 @@ void test_recal_resets_everything(void) {
 void test_click_threshold_clamped(void) {
     SwingTracker t;
     t.setClickThresholdDegrees(0.5f);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 2.0f, t.clickThresholdDegrees());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.5f, t.clickThresholdDegrees());
     t.setClickThresholdDegrees(99.0f);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 12.0f, t.clickThresholdDegrees());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 14.3f, t.clickThresholdDegrees());
     t.setClickThresholdDegrees(7.0f);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 7.0f, t.clickThresholdDegrees());
 }

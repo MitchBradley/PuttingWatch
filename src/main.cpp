@@ -99,6 +99,22 @@ static uint32_t touchIgnoreUntilMs = 0;         // swallow the light-sleep wake 
 // so it can't blind-press a control. Other screens stay on. A double
 // background-tap on the run screen goes to light sleep (ui::onTap). All state
 // here is touched from the loop thread only.
+// Click sensitivity, shown to the user as a plain "level" 1-10 instead of a
+// raw degree count - degrees (especially small ones, 3 and under) turned out
+// to be hard for people to reason about. Level 1 = kLevelBaseDegrees, each
+// step up adds kLevelStepDegrees. N is fixed for now; the plan is to make it
+// user-configurable later (per-stroke / green-speed tuning), at which point
+// this stops being a compile-time constant - see SwingTracker::Config's
+// clickThresholdDegreesMin/Max, which must stay in sync with level 1 and 10.
+static constexpr float kLevelBaseDegrees = 3.5f;  // level 1
+static constexpr float kLevelStepDegrees = 1.2f;  // degrees per level (N)
+static int levelForDegrees(float deg) {
+    return (int)lroundf((deg - kLevelBaseDegrees) / kLevelStepDegrees) + 1;
+}
+static float degreesForLevel(int level) {
+    return kLevelBaseDegrees + (float)(level - 1) * kLevelStepDegrees;
+}
+
 static constexpr uint8_t  kBrightFull     = 0xD0;  // CO5300 init value
 static constexpr uint32_t kBrightHoldMs   = 5000;
 static constexpr uint32_t kWakeSwallowMs  = 400;   // ignore touches this long after a wake
@@ -387,13 +403,16 @@ static void wireUiHooks() {
         // value or speak it.
         xSemaphoreTake(trackerMux, portMAX_DELAY);
         bool adjust = tracker.state() == SwingTracker::State::Monitoring;
-        int nv = 0;
+        int newLevel = 0;
         if (adjust) {
-            tracker.setClickThresholdDegrees(tracker.clickThresholdDegrees() + delta);
-            nv = (int)lroundf(tracker.clickThresholdDegrees());  // clamped value
+            int curLevel = levelForDegrees(tracker.clickThresholdDegrees());
+            newLevel = curLevel + delta;
+            if (newLevel < 1) newLevel = 1;
+            if (newLevel > 10) newLevel = 10;
+            tracker.setClickThresholdDegrees(degreesForLevel(newLevel));
         }
         xSemaphoreGive(trackerMux);
-        if (adjust) clicker.playNumber(nv);  // "four".."twelve"; tone fallback if no samples
+        if (adjust) clicker.playNumber(newLevel);  // "one".."ten"; tone fallback if no samples
     };
 }
 
@@ -578,7 +597,7 @@ void loop() {
             snap.phase = tracker.swingPhase();
             snap.ready = tracker.isReadyForSwing();
             snap.angleDeg = tracker.swingAngleDegrees();
-            snap.clickThresholdDeg = tracker.clickThresholdDegrees();
+            snap.clickLevel = levelForDegrees(tracker.clickThresholdDegrees());
             snap.clickCount = tracker.clickCount();
             tracker.restGravity().store(snap.restG);
             xSemaphoreGive(trackerMux);
@@ -591,29 +610,18 @@ void loop() {
             // Enable it as soon as calibration starts (Accumulating) rather
             // than on entry to Monitoring, so it has the full ~2 s hold-still
             // window to leave shutdown - otherwise the attack of the first
-            // spoken interval ("six") on the main screen is clipped. Off again
-            // on Recal (back to WaitingForCalibration).
+            // cue on the main screen is clipped. Off again on Recal (back to
+            // WaitingForCalibration).
             clicker.setAmpEnabled(snap.state != SwingTracker::State::WaitingForCalibration);
 
-            // Cue for "calibration done, main screen is up": speak the current
-            // click interval (e.g. "seven") the first time we land on the
-            // Monitoring screen after calibration. Replaces the old
-            // double-beep, and holds the announcement back to this point
-            // rather than firing it right after the session starts.
-            static SwingTracker::State lastCueState = SwingTracker::State::WaitingForCalibration;
-            bool enteredMonitoring = snap.state == SwingTracker::State::Monitoring &&
-                                     lastCueState != SwingTracker::State::Monitoring;
-            if (enteredMonitoring) {
-                clicker.playNumber((int)lroundf(snap.clickThresholdDeg));
-            }
-            lastCueState = snap.state;
-
             // "Ready" cue: speak assets/ready.wav on a rising edge of the
-            // armed state - i.e. when re-armed for the next stroke after a
-            // putt. Skip the edge that coincides with entering Monitoring;
-            // the click-interval announcement above already signals "go".
-            // (lastReady is a file global - blankedLoop() maintains it too.)
-            if (snap.ready && !lastReady && !enteredMonitoring) {
+            // armed state - covers both "just landed on the Monitoring
+            // screen" (isReadyForSwing() is already true the instant
+            // Monitoring begins, so this fires right there - no separate
+            // click-level announcement) and "re-armed for the next stroke
+            // after a putt". (lastReady is a file global - blankedLoop()
+            // maintains it too.)
+            if (snap.ready && !lastReady) {
                 clicker.playCue(CUE_READY);
             }
             lastReady = snap.ready;

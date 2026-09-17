@@ -261,7 +261,7 @@ void render(const Snapshot& s) {
             bg = s.ready ? kBgReady : kBgIdleDark;
             snprintf(status, sizeof(status), "%s", s.ready ? "Ready" : "");
             snprintf(big, sizeof(big), "%.1f\xC2\xB0", s.angleDeg);
-            snprintf(thresh, sizeof(thresh), "click  %.0f\xC2\xB0", s.clickThresholdDeg);
+            snprintf(thresh, sizeof(thresh), "click  %d", s.clickLevel);
             showBig = showThresh = showTopBtns = showNudge = true;
             break;
     }
