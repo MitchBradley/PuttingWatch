@@ -125,6 +125,21 @@ static uint32_t lastBgTapMs      = 0;   // background clicks only, for double-ta
 static bool     runScreenBlanked = false;
 static bool     lastReady        = false;  // ready-cue edge, maintained in both loop modes
 
+// A swing angle this big on the run screen isn't normal putting motion -
+// probably someone looking at the watch mid-motion, or just checking it
+// while holding the putter - so light it up regardless of whether a tap
+// caused it. Independent hold from the tap-driven kBrightHoldMs (own
+// timestamp, own duration): a stray big angle shouldn't cut a tap's hold
+// short, and vice versa - the run screen only blanks once BOTH have expired.
+// One-shot on the RISING edge only (angleWasOverThreshold tracks it): if the
+// angle just stays past the threshold (e.g. the watch is left tilted), the
+// hold must still expire on schedule rather than being continuously
+// re-armed and never blanking at all.
+static constexpr float    kAngleWakeThresholdDeg = 45.0f;
+static constexpr uint32_t kAngleWakeHoldMs       = 10000;
+static uint32_t lastAngleWakeMs      = 0;      // set on the rising edge past the threshold
+static bool     angleWasOverThreshold = false;  // edge state, maintained in both loop modes
+
 // LVGL draw buffer (partial mode). 100 lines so the tallest dynamic element
 // (the montserrat-48 angle label, a fixed 70 px box - see ui.cpp) always
 // redraws in a SINGLE tile => one monotonic top-to-bottom QSPI push, no
@@ -550,10 +565,21 @@ static void blankedLoop() {
     if (xSemaphoreTake(trackerMux, pdMS_TO_TICKS(5)) == pdTRUE) {
         bool ready = tracker.isReadyForSwing();
         bool inRun = tracker.state() == SwingTracker::State::Monitoring;
+        float angle = tracker.swingAngleDegrees();
         xSemaphoreGive(trackerMux);
         if (ready && !lastReady) clicker.playCue(CUE_READY);
         lastReady = ready;
         if (!inRun) wakeRunScreen();  // defensive: can't happen without a tap
+        // Big swing angle while blanked wakes the screen too, not just a
+        // tap - see kAngleWakeThresholdDeg / kAngleWakeHoldMs. Rising edge
+        // only, so holding a big angle can't block the screen from ever
+        // blanking again.
+        bool angleOver = inRun && angle > kAngleWakeThresholdDeg;
+        if (angleOver && !angleWasOverThreshold) {
+            lastAngleWakeMs = millis();
+            wakeRunScreen();
+        }
+        angleWasOverThreshold = angleOver;
     }
 
     pollBattery();
@@ -641,12 +667,19 @@ void loop() {
                 USBSerial.printf("cpu -> %u MHz\n", (unsigned)getCpuFrequencyMhz());
             }
 
+            bool runScreen = snap.state == SwingTracker::State::Monitoring;
+            // Rising edge only - see the angleWasOverThreshold comment above.
+            bool angleOver = runScreen && snap.angleDeg > kAngleWakeThresholdDeg;
+            if (angleOver && !angleWasOverThreshold) lastAngleWakeMs = millis();
+            angleWasOverThreshold = angleOver;
+
             // Power: on the run screen, once kBrightHoldMs has elapsed since
-            // the last tap, blank the panel (DISPOFF - bare command, ~0 OLED
+            // the last tap AND kAngleWakeHoldMs since the last big-angle
+            // event, blank the panel (DISPOFF - bare command, ~0 OLED
             // emission, last frame kept in GRAM) and drop into blankedLoop()
             // next iteration. wakeRunScreen() brings it back on a tap.
-            bool runScreen = snap.state == SwingTracker::State::Monitoring;
-            if (runScreen && millis() - lastTapMs >= kBrightHoldMs) {
+            if (runScreen && millis() - lastTapMs >= kBrightHoldMs &&
+                millis() - lastAngleWakeMs >= kAngleWakeHoldMs) {
                 bus->sendCommand(CO5300_C_DISPOFF);
                 runScreenBlanked = true;
             }
