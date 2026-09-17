@@ -103,9 +103,13 @@ void SwingTracker::processMonitoringSample(const MotionSample& s) {
             // - still fires at the same instant on the way up (peak == angle
             //   while rising).
             // Loop so a fast swing that jumps several thresholds in one
-            // sample still emits one click per threshold crossed.
+            // sample still emits one click per threshold crossed - but capped
+            // at maxClicksPerSwing (lastClickBucket_ is already exactly "how
+            // many clicks this backswing attempt has fired", since it resets
+            // on every re-arm, so gating on it directly is enough - no
+            // separate counter needed).
             const int peakBucket = static_cast<int>(peakAngleThisSwing_ / clickThresholdDegrees_);
-            while (lastClickBucket_ < peakBucket) {
+            while (lastClickBucket_ < peakBucket && lastClickBucket_ < cfg_.maxClicksPerSwing) {
                 lastClickBucket_++;
                 clickCount_++;
                 if (onClick) onClick();

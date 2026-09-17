@@ -76,26 +76,54 @@ void test_backswing_clicks_then_reversal(void) {
     uint32_t clock = 0;
     calibrateIntoMonitoring(t, clock);
 
-    // Backswing out to 25 deg: crossings at 6/12/18/24 -> 4 clicks.
+    // Backswing out to 25 deg: crossings at 6/12/18/24 would be 4 clicks,
+    // but maxClicksPerSwing (default 3) caps it at 6/12/18 - a swing that
+    // fast isn't a good stroke, no point clicking every threshold past that.
     int clicks = 0;
     t.onClick = [&] { clicks++; };
     ramp(t, 0.0f, 25.0f, 60, clock);
-    TEST_ASSERT_EQUAL_INT(4, clicks);
-    TEST_ASSERT_EQUAL_INT(4, t.clickCount());
+    TEST_ASSERT_EQUAL_INT(3, clicks);
+    TEST_ASSERT_EQUAL_INT(3, t.clickCount());
     TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::Backswing);
 
     // Come back down. Clicking is off the monotonic peak, so the descent
     // fires NOTHING - no stray "click twice" as the angle re-crosses a
     // threshold before reversalDrop trips. Reversal (>=2 deg below the peak)
-    // still switches to ForwardStroke.
+    // still switches to ForwardStroke - the cap doesn't touch reversal
+    // detection at all, that's driven by the continuous peak, not the
+    // (now capped) click bucket.
     ramp(t, 25.0f, 0.0f, 60, clock);
-    TEST_ASSERT_EQUAL_INT(4, clicks);
+    TEST_ASSERT_EQUAL_INT(3, clicks);
     TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::ForwardStroke);
     TEST_ASSERT_FALSE(t.isReadyForSwing());
 
     int clicksAfterReversal = clicks;
     ramp(t, 0.0f, 25.0f, 60, clock);  // a "swing" during forward-stroke: ignored
     TEST_ASSERT_EQUAL_INT(clicksAfterReversal, clicks);
+}
+
+// The cap is per swing ATTEMPT, not lifetime: an oversized backswing still
+// stops at 3, but re-arming resets it, so the next stroke can click up to 3
+// again too.
+void test_max_clicks_per_swing_cap_resets_on_rearm(void) {
+    SwingTracker t;
+    t.setClickThresholdDegrees(6.0f);
+    uint32_t clock = 0;
+    calibrateIntoMonitoring(t, clock);
+
+    int clicks = 0;
+    t.onClick = [&] { clicks++; };
+
+    // Way oversized: 6/12/18/24/30/36 would be 6 crossings, capped to 3.
+    ramp(t, 0.0f, 40.0f, 80, clock);
+    TEST_ASSERT_EQUAL_INT(3, clicks);
+
+    ramp(t, 40.0f, 0.0f, 60, clock);
+    hold(t, 0.0f, 450, clock);  // 2 s end-of-swing + 1 s stillness -> re-arm
+    TEST_ASSERT_TRUE(t.isReadyForSwing());
+
+    ramp(t, 0.0f, 25.0f, 60, clock);  // ordinary swing, same 3-click cap applies fresh
+    TEST_ASSERT_EQUAL_INT(6, clicks);  // 3 from before + 3 more, not stuck at 3
 }
 
 // A swing whose peak never reaches one full threshold step must still reverse
@@ -195,6 +223,7 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_calibration_flow);
     RUN_TEST(test_backswing_clicks_then_reversal);
+    RUN_TEST(test_max_clicks_per_swing_cap_resets_on_rearm);
     RUN_TEST(test_small_swing_still_reverses);
     RUN_TEST(test_boundary_jitter_single_click);
     RUN_TEST(test_rearm_when_settled_near_original_rest);

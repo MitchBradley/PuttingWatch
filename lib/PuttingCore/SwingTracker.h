@@ -48,6 +48,12 @@ class SwingTracker {
         float stillnessToleranceDegrees = 3.0f;   // drift that resets the stillness window
         float restRecenterMaxDriftDegrees = 10.0f; // settled pos must be this near the
                                                    // ORIGINAL calibrated rest to re-center
+        // A good putting stroke clicks at most twice; three or more in one
+        // backswing means the golfer is swinging far too fast for the
+        // stroke to be any good, so there's no point pestering them with
+        // every further threshold crossing. Caps clicks per backswing
+        // attempt, not overall - lastClickBucket_ resets on every re-arm.
+        int maxClicksPerSwing = 3;
     };
 
     SwingTracker() = default;
