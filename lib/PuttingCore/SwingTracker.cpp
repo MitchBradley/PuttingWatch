@@ -22,6 +22,8 @@ void SwingTracker::recal() {
     lastClickBucket_ = 0;
     clickCount_ = 0;
     peakAngleThisSwing_ = 0.0f;
+    haveDirectionRef_ = false;
+    directionRef_ = Vec3{0, 0, 0};
     forwardStrokeStartMs_ = 0;
     haveStillnessRef_ = false;
 }
@@ -78,6 +80,8 @@ void SwingTracker::enterMonitoring() {
     lastClickBucket_ = 0;
     clickCount_ = 0;
     peakAngleThisSwing_ = 0.0f;
+    haveDirectionRef_ = false;
+    directionRef_ = Vec3{0, 0, 0};
     forwardStrokeStartMs_ = 0;
     haveStillnessRef_ = false;
 }
@@ -94,7 +98,24 @@ void SwingTracker::processMonitoringSample(const MotionSample& s) {
 
     switch (swingPhase_) {
         case SwingPhase::Backswing: {
-            if (angle > peakAngleThisSwing_) peakAngleThisSwing_ = angle;
+            // angle alone can't tell a real backswing from a wobble in the
+            // opposite direction - it's an unsigned distance from rest. Once
+            // a swing this calibration has gone far enough to be trusted as
+            // the real backswing direction, latch it; from then on, motion
+            // on the other side of rest reads as 0 instead of raising the
+            // peak (see Config::directionLockDegrees).
+            const Vec3 deviation = g - restGravity_;
+            float effectiveAngle = angle;
+            if (!haveDirectionRef_) {
+                if (angle >= cfg_.directionLockDegrees) {
+                    directionRef_ = deviation;
+                    haveDirectionRef_ = true;
+                }
+            } else if (deviation.dot(directionRef_) <= 0.0f) {
+                effectiveAngle = 0.0f;
+            }
+
+            if (effectiveAngle > peakAngleThisSwing_) peakAngleThisSwing_ = effectiveAngle;
 
             // Click off the MONOTONIC peak, not the instantaneous angle:
             // - never fires on the way back down (the angle re-crossing a
@@ -122,7 +143,7 @@ void SwingTracker::processMonitoringSample(const MotionSample& s) {
             // the phase machine would never leave Backswing and clicks would
             // fire straight through the follow-through too. (Bug fixed in the
             // Swift app, commit 3bd9688.)
-            if (angle <= peakAngleThisSwing_ - cfg_.reversalDropDegrees) {
+            if (effectiveAngle <= peakAngleThisSwing_ - cfg_.reversalDropDegrees) {
                 swingPhase_ = SwingPhase::ForwardStroke;
                 forwardStrokeStartMs_ = s.t_ms;
             }

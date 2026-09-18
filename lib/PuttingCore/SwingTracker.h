@@ -54,6 +54,18 @@ class SwingTracker {
         // every further threshold crossing. Caps clicks per backswing
         // attempt, not overall - lastClickBucket_ resets on every re-arm.
         int maxClicksPerSwing = 3;
+        // A tilt opposite the real backswing direction (address wobble, a
+        // false start) is otherwise indistinguishable from a real small
+        // backswing: swingAngleDegrees is an unsigned distance from rest, so
+        // either one raises the peak and can trip a false reversal, which
+        // then swallows the real stroke that follows (ForwardStroke
+        // suppresses clicking outright). Once any swing this calibration
+        // reaches this many degrees, its direction is latched as "the"
+        // backswing direction; anything on the other side of rest from then
+        // on reads as angle 0 instead of contributing to the peak. Only the
+        // very first excursion of a calibration is unprotected (no direction
+        // latched yet) - assumed to be a real backswing, not a wobble.
+        float directionLockDegrees = 4.0f;
     };
 
     SwingTracker() = default;
@@ -120,6 +132,10 @@ class SwingTracker {
     int lastClickBucket_ = 0;
     int clickCount_ = 0;
     float peakAngleThisSwing_ = 0.0f;
+
+    // --- backswing direction lock (see Config::directionLockDegrees) ---
+    bool haveDirectionRef_ = false;
+    Vec3 directionRef_{0, 0, 0};  // g - restGravity_ at the moment of the lock
 
     uint32_t forwardStrokeStartMs_ = 0;
 

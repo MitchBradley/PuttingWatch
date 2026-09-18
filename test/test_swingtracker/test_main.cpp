@@ -209,6 +209,47 @@ void test_recal_resets_everything(void) {
     TEST_ASSERT_FALSE(t.isReadyForSwing());
 }
 
+// The on-course bug report: a small wobble in the OPPOSITE direction from the
+// real backswing (e.g. at address, before the golfer starts the real stroke)
+// must not be mistaken for a completed swing. Without the direction lock,
+// angleBetweenDegrees is unsigned - the wobble raises peakAngleThisSwing_,
+// returning toward rest satisfies the reversal check, and the state machine
+// jumps to ForwardStroke (clicking suppressed) right before the real
+// backswing, swallowing it. With the lock (established off the first real
+// swing, which is assumed to clear directionLockDegrees), an opposite-
+// direction excursion instead reads as angle 0 and can't touch phase or peak.
+void test_direction_lock_ignores_opposite_wobble(void) {
+    SwingTracker t;
+    t.setClickThresholdDegrees(6.0f);
+    uint32_t clock = 0;
+    calibrateIntoMonitoring(t, clock);
+
+    int clicks = 0;
+    t.onClick = [&] { clicks++; };
+
+    // First real backswing: establishes the direction lock (peak clears the
+    // default 4 deg directionLockDegrees) and clicks normally.
+    ramp(t, 0.0f, 25.0f, 60, clock);
+    TEST_ASSERT_EQUAL_INT(3, clicks);
+    ramp(t, 25.0f, 0.0f, 40, clock);
+    hold(t, 0.0f, 450, clock);  // 2 s end-of-swing + 1 s stillness -> re-arm
+    TEST_ASSERT_TRUE(t.isReadyForSwing());
+
+    // A wobble in the OPPOSITE direction, well under the click threshold -
+    // the exact shape of the reported false-click-suppression scenario. Must
+    // not raise the peak, trigger a reversal, or leave Backswing at all.
+    ramp(t, 0.0f, -3.0f, 30, clock);
+    ramp(t, -3.0f, 0.0f, 30, clock);
+    TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::Backswing);
+    TEST_ASSERT_TRUE(t.isReadyForSwing());
+    TEST_ASSERT_EQUAL_INT(3, clicks);
+
+    // The real second backswing must still click normally - it wasn't
+    // silently swallowed by a false ForwardStroke from the wobble.
+    ramp(t, 0.0f, 25.0f, 60, clock);
+    TEST_ASSERT_EQUAL_INT(6, clicks);
+}
+
 void test_click_threshold_clamped(void) {
     SwingTracker t;
     t.setClickThresholdDegrees(0.5f);
@@ -228,6 +269,7 @@ int main(int, char**) {
     RUN_TEST(test_boundary_jitter_single_click);
     RUN_TEST(test_rearm_when_settled_near_original_rest);
     RUN_TEST(test_no_rearm_when_settled_far_from_original_rest);
+    RUN_TEST(test_direction_lock_ignores_opposite_wobble);
     RUN_TEST(test_recal_resets_everything);
     RUN_TEST(test_click_threshold_clamped);
     return UNITY_END();
