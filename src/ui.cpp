@@ -37,6 +37,14 @@ constexpr uint32_t kBgAccum = 0xE6E600;     // bright yellow "hold still"
 constexpr uint32_t kBgIdleDark = 0x000000;  // black
 constexpr uint32_t kBgReady = 0x005A0D;     // clear green = armed
 
+// Battery row Y position: on Monitoring/Done it sits just below the top
+// Recal/Stop buttons; on the initial "Tap when in putting position" screen
+// (no buttons there) it's shifted up by its own text height to clear the
+// Honu image, which starts close beneath it.
+constexpr int kBattYNormal  = 112;
+constexpr int kBattTextH    = 34;
+constexpr int kBattYWaiting = kBattYNormal - kBattTextH + 11;
+
 void rootClicked(lv_event_t*) {
     if (onTap) onTap();
 }
@@ -105,7 +113,7 @@ void init() {
     lv_obj_set_style_text_color(waitLabel, lv_color_black(), 0);
     lv_obj_set_width(waitLabel, LCD_WIDTH - 80);
     lv_obj_set_style_text_align(waitLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(waitLabel, LV_ALIGN_TOP_MID, 0, 18);
+    lv_obj_align(waitLabel, LV_ALIGN_TOP_MID, 0, 12);
 
     // Recal / Stop across the TOP.
     recalBtn = makeButton("Recal", recalClicked, LV_ALIGN_TOP_MID, -88, 12, 150, 82,
@@ -121,9 +129,9 @@ void init() {
     battLabel = lv_label_create(root);
     lv_obj_set_style_text_font(battLabel, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(battLabel, lv_color_white(), 0);
-    lv_obj_set_size(battLabel, 180, 34);  // fits "100% 4200 mV"
+    lv_obj_set_size(battLabel, 180, kBattTextH);  // fits "100% 4200 mV"
     lv_obj_set_style_text_align(battLabel, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_align(battLabel, LV_ALIGN_TOP_MID, -60, 112);
+    lv_obj_align(battLabel, LV_ALIGN_TOP_MID, -60, kBattYNormal);
 
     battBar = lv_bar_create(root);
     lv_obj_set_size(battBar, 108, 20);
@@ -215,7 +223,7 @@ void render(const Snapshot& s) {
     static int lastVis = -1;
     static int lastBatt = -2;
     static int lastBattMv = -2;
-    static int lastBattTextLight = -1;
+    static int lastBattOnWaitScreen = -1;
 
     char status[48] = "";
     char wait[48] = "";
@@ -269,10 +277,11 @@ void render(const Snapshot& s) {
 
     // Battery shows on the top-button screens (Monitoring/Done) AND the
     // initial "Tap when in putting position" screen - the one place besides
-    // Monitoring a golfer is likely to check it before starting. Text is
-    // black there (white background) instead of the usual white.
+    // Monitoring a golfer is likely to check it before starting. There it's
+    // black text (white background, instead of the usual white) and shifted
+    // up (kBattYWaiting) to clear the Honu image just beneath it.
     bool showBatt = showTopBtns || s.state == State::WaitingForCalibration;
-    bool battTextLight = s.state == State::WaitingForCalibration;
+    bool battOnWaitScreen = s.state == State::WaitingForCalibration;
 
     if (strcmp(status, lastStatus)) {
         strcpy(lastStatus, status);
@@ -309,10 +318,13 @@ void render(const Snapshot& s) {
             snprintf(b, sizeof(b), "%d%% %d mV", pct, s.batteryMv);
         lv_label_set_text(battLabel, b);
     }
-    if ((int)battTextLight != lastBattTextLight) {
-        lastBattTextLight = (int)battTextLight;
-        lv_obj_set_style_text_color(battLabel, battTextLight ? lv_color_black() : lv_color_white(),
-                                    0);
+    if ((int)battOnWaitScreen != lastBattOnWaitScreen) {
+        lastBattOnWaitScreen = (int)battOnWaitScreen;
+        lv_obj_set_style_text_color(
+            battLabel, battOnWaitScreen ? lv_color_black() : lv_color_white(), 0);
+        lv_obj_align(battLabel, LV_ALIGN_TOP_MID, -60,
+                    battOnWaitScreen ? kBattYWaiting : kBattYNormal);
+        lv_obj_align_to(battBar, battLabel, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
     }
 
     int vis = (showBig ? 1 : 0) | (showThresh ? 2 : 0) | (showTopBtns ? 4 : 0) |
