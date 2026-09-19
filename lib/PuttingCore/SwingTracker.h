@@ -36,12 +36,13 @@ class SwingTracker {
     struct Config {
         uint32_t accumulationMs = 2000;    // hold-still averaging window
         uint32_t monitoringDelayMs = 2000; // Done -> Monitoring auto-advance
-        // Matches the UI's 1..10 "sensitivity level" mapping (main.cpp:
-        // kLevelBaseDegrees=3.5, kLevelStepDegrees=1.2) - level 1 and level
-        // 10 respectively. Keep in sync if that mapping changes; this class
-        // only ever reasons in degrees, the level is purely a UI concept.
+        // Matches the UI's 1..16 "sensitivity level" mapping (main.cpp:
+        // kLevelBaseDegrees=3.5, kLevelStepDegrees=0.8, kLevelCount=16) -
+        // level 1 and level 16 respectively. Keep in sync if that mapping
+        // changes; this class only ever reasons in degrees, the level is
+        // purely a UI concept.
         float clickThresholdDegreesMin = 3.5f;
-        float clickThresholdDegreesMax = 14.3f;
+        float clickThresholdDegreesMax = 15.5f;
         float reversalDropDegrees = 2.0f;      // drop below peak => forward stroke
         uint32_t endOfSwingDelayMs = 2000;     // forward stroke held this long => recovering
         uint32_t stillnessDurationMs = 1000;   // continuous still time before re-arm
@@ -66,6 +67,18 @@ class SwingTracker {
         // very first excursion of a calibration is unprotected (no direction
         // latched yet) - assumed to be a real backswing, not a wobble.
         float directionLockDegrees = 4.0f;
+
+        // Autocal (WaitingForCalibration): rather than requiring a tap, watch
+        // for the gravity Z component (device frame) dropping below this
+        // while held still - the watch tilts from face-up viewing position
+        // (Z > 0.9 measured) to putting position (Z ~0.125 measured) when the
+        // golfer addresses the ball. tap() still works as a manual override.
+        float autocalNotFlatZ = 0.25f;
+        // How long that not-flat position must be held still (reusing
+        // stillnessToleranceDegrees as the drift gate) before it's accepted
+        // as the calibrated rest - about how long a golfer naturally pauses
+        // at address.
+        uint32_t autocalStillnessMs = 3000;
     };
 
     SwingTracker() = default;
@@ -120,6 +133,13 @@ class SwingTracker {
     uint32_t accumStartMs_ = 0;
     Vec3 accumSum_{0, 0, 0};
     int accumCount_ = 0;
+
+    // --- autocal (WaitingForCalibration) ---
+    bool haveAutocalRef_ = false;
+    Vec3 autocalRefGravity_{0, 0, 0};   // resets the window whenever drift exceeds tolerance
+    uint32_t autocalWindowStartMs_ = 0;
+    Vec3 autocalSum_{0, 0, 0};
+    int autocalCount_ = 0;
 
     uint32_t doneEnteredMs_ = 0;
 

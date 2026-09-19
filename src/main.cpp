@@ -69,6 +69,12 @@ static void touchIsr() { touch->IIC_Interrupt_Flag = true; }
 static Imu imu;
 static GravityFilter gravityFilter;
 
+// Latest gravity reading, written every sample by samplingTask - for the
+// serial diagnostic line only (autocal threshold tuning: what does gravity
+// read flat-on-wrist vs. in putting position?). Not mutex-guarded like
+// `tracker`; a torn read here is a one-line diagnostic glitch, not a bug.
+static Vec3 lastGravity{0, 0, 1};
+
 // Default model config, except: unless the "Rest captured" debug screen is
 // built in, collapse the post-calibration Done dwell to zero so calibration
 // hands straight off to Monitoring (see include/app_config.h).
@@ -99,15 +105,18 @@ static uint32_t touchIgnoreUntilMs = 0;         // swallow the light-sleep wake 
 // so it can't blind-press a control. Other screens stay on. A double
 // background-tap on the run screen goes to light sleep (ui::onTap). All state
 // here is touched from the loop thread only.
-// Click sensitivity, shown to the user as a plain "level" 1-10 instead of a
+// Click sensitivity, shown to the user as a plain "level" 1-16 instead of a
 // raw degree count - degrees (especially small ones, 3 and under) turned out
 // to be hard for people to reason about. Level 1 = kLevelBaseDegrees, each
-// step up adds kLevelStepDegrees. N is fixed for now; the plan is to make it
-// user-configurable later (per-stroke / green-speed tuning), at which point
-// this stops being a compile-time constant - see SwingTracker::Config's
-// clickThresholdDegreesMin/Max, which must stay in sync with level 1 and 10.
+// step up adds kLevelStepDegrees. 16 levels matches the spoken numbers
+// compiled into numbers_audio.h (one..sixteen). N is fixed for now; the plan
+// is to make it user-configurable later (per-stroke / green-speed tuning), at
+// which point this stops being a compile-time constant - see
+// SwingTracker::Config's clickThresholdDegreesMin/Max, which must stay in
+// sync with level 1 and kLevelCount, and onAdjustClickThreshold's clamp.
 static constexpr float kLevelBaseDegrees = 3.5f;  // level 1
-static constexpr float kLevelStepDegrees = 1.2f;  // degrees per level (N)
+static constexpr float kLevelStepDegrees = 0.8f;  // degrees per level (N)
+static constexpr int kLevelCount = 16;
 static int levelForDegrees(float deg) {
     return (int)lroundf((deg - kLevelBaseDegrees) / kLevelStepDegrees) + 1;
 }
@@ -208,6 +217,7 @@ static void samplingTask(void*) {
         gravityFilter.gravity().store(s.gravity);
         gyro_rps.store(s.rotationRate);
         accel_g.store(s.accel);
+        lastGravity = gravityFilter.gravity();
 
         if (xSemaphoreTake(trackerMux, portMAX_DELAY) == pdTRUE) {
             tracker.update(s);
@@ -423,11 +433,11 @@ static void wireUiHooks() {
             int curLevel = levelForDegrees(tracker.clickThresholdDegrees());
             newLevel = curLevel + delta;
             if (newLevel < 1) newLevel = 1;
-            if (newLevel > 10) newLevel = 10;
+            if (newLevel > kLevelCount) newLevel = kLevelCount;
             tracker.setClickThresholdDegrees(degreesForLevel(newLevel));
         }
         xSemaphoreGive(trackerMux);
-        if (adjust) clicker.playNumber(newLevel);  // "one".."ten"; tone fallback if no samples
+        if (adjust) clicker.playNumber(newLevel);  // "one".."sixteen"; tone fallback if no samples
     };
 }
 
@@ -528,10 +538,11 @@ static void serialLog() {
     static uint32_t last = 0;
     if (!USBSerial || millis() - last < 1000) return;
     last = millis();
-    USBSerial.printf("state=%d phase=%d ready=%d angle=%.1f clicks=%d batt=%d%% %d mV heap=%u\n",
-                     (int)tracker.state(), (int)tracker.swingPhase(), tracker.isReadyForSwing(),
-                     tracker.swingAngleDegrees(), tracker.clickCount(), batteryPct, batteryMv,
-                     (unsigned)ESP.getFreeHeap());
+    USBSerial.printf(
+        "state=%d phase=%d ready=%d angle=%.1f clicks=%d g=(%.3f,%.3f,%.3f) batt=%d%% %d mV heap=%u\n",
+        (int)tracker.state(), (int)tracker.swingPhase(), tracker.isReadyForSwing(),
+        tracker.swingAngleDegrees(), tracker.clickCount(), lastGravity.x, lastGravity.y, lastGravity.z,
+        batteryPct, batteryMv, (unsigned)ESP.getFreeHeap());
 }
 
 // Un-blank the run screen: DISPON, last frame is still in GRAM, force a

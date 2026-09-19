@@ -18,6 +18,11 @@ void SwingTracker::recal() {
     accumPending_ = false;
     accumSum_ = Vec3{0, 0, 0};
     accumCount_ = 0;
+    haveAutocalRef_ = false;
+    autocalRefGravity_ = Vec3{0, 0, 0};
+    autocalWindowStartMs_ = 0;
+    autocalSum_ = Vec3{0, 0, 0};
+    autocalCount_ = 0;
     swingAngleDegrees_ = 0.0f;
     lastClickBucket_ = 0;
     clickCount_ = 0;
@@ -32,8 +37,40 @@ void SwingTracker::update(const MotionSample& s) {
     const Vec3 g(s.gravity);
 
     switch (state_) {
-        case State::WaitingForCalibration:
+        // Autocal: rather than requiring tap(), watch for the watch tilting
+        // out of face-up viewing position (gravity Z drops below
+        // autocalNotFlatZ) and being held still there - that's the golfer at
+        // address. tap() remains a live manual override, handled separately
+        // (it jumps straight to Accumulating, bypassing this entirely).
+        case State::WaitingForCalibration: {
+            if (g.z >= cfg_.autocalNotFlatZ) {
+                // Still flat/viewing - no candidate window in progress.
+                haveAutocalRef_ = false;
+                break;
+            }
+            const float driftFromRef =
+                haveAutocalRef_ ? angleBetweenDegrees(g, autocalRefGravity_) : 0.0f;
+            if (!haveAutocalRef_ || driftFromRef > cfg_.stillnessToleranceDegrees) {
+                // (Re)start the window from here.
+                haveAutocalRef_ = true;
+                autocalRefGravity_ = g;
+                autocalWindowStartMs_ = s.t_ms;
+                autocalSum_ = g;
+                autocalCount_ = 1;
+                break;
+            }
+            autocalSum_ = autocalSum_ + g;
+            autocalCount_++;
+            if (s.t_ms - autocalWindowStartMs_ >= cfg_.autocalStillnessMs) {
+                restGravity_ = (autocalSum_ * (1.0f / autocalCount_)).normalized();
+                initialRestGravity_ = restGravity_;
+                state_ = State::Done;
+                doneEnteredMs_ = s.t_ms;
+                haveAutocalRef_ = false;
+                if (onCalibrationComplete) onCalibrationComplete();
+            }
             break;
+        }
 
         case State::Accumulating: {
             if (accumPending_) {

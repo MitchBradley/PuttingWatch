@@ -218,6 +218,62 @@ void test_recal_resets_everything(void) {
 // backswing, swallowing it. With the lock (established off the first real
 // swing, which is assumed to clear directionLockDegrees), an opposite-
 // direction excursion instead reads as angle 0 and can't touch phase or peak.
+// Autocal: no tap() needed. Gravity Z (device frame) reads > 0.9 flat/viewing
+// on the wrist and ~0.125 in putting address (measured on hardware) - tilting
+// past autocalNotFlatZ (0.25) and holding still there for autocalStillnessMs
+// should calibrate on its own, the same way tap()+hold used to require an
+// explicit tap.
+void test_autocal_fires_after_notflat_still(void) {
+    SwingTracker t;
+    uint32_t clock = 0;
+    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::WaitingForCalibration);
+
+    hold(t, 0.0f, 100, clock);  // flat/viewing for 1 s - must not arm
+    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::WaitingForCalibration);
+
+    // ~83 deg tilt -> gravity.z ~= cos(83deg) ~= 0.122, well past the 0.25
+    // not-flat threshold - stand-in for real putting-position address.
+    hold(t, 83.0f, 310, clock);  // 3.1 s held still there -> past autocalStillnessMs (3 s)
+    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::Done);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, std::cos(83.0f * 3.14159265f / 180.0f), t.restGravity().z);
+
+    hold(t, 83.0f, 210, clock);  // past the 2 s Done->Monitoring delay
+    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::Monitoring);
+    TEST_ASSERT_TRUE(t.isReadyForSwing());
+}
+
+void test_autocal_does_not_fire_while_flat(void) {
+    SwingTracker t;
+    uint32_t clock = 0;
+    hold(t, 0.0f, 500, clock);  // 5 s flat/viewing, well past autocalStillnessMs
+    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::WaitingForCalibration);
+}
+
+// A disturbance mid-window (still not flat, but a big jump - e.g. adjusting
+// grip before settling into address) must restart the stillness window
+// rather than let the earlier, now-stale position complete calibration.
+void test_autocal_window_restarts_on_motion(void) {
+    SwingTracker t;
+    uint32_t clock = 0;
+
+    hold(t, 83.0f, 150, clock);  // 1.5 s - not enough yet
+    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::WaitingForCalibration);
+
+    hold(t, 88.0f, 310, clock);  // jumps to a different not-flat tilt and settles there
+    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::Done);
+    // Calibrated against the 88 deg position it actually settled at, not 83.
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, std::cos(88.0f * 3.14159265f / 180.0f), t.restGravity().z);
+}
+
+// tap() remains a live manual override even mid-autocal-window.
+void test_tap_overrides_autocal_mid_window(void) {
+    SwingTracker t;
+    uint32_t clock = 0;
+    hold(t, 83.0f, 150, clock);  // mid-window, autocal hasn't fired yet
+    t.tap();
+    TEST_ASSERT_TRUE(t.state() == SwingTracker::State::Accumulating);
+}
+
 void test_direction_lock_ignores_opposite_wobble(void) {
     SwingTracker t;
     t.setClickThresholdDegrees(6.0f);
@@ -255,7 +311,7 @@ void test_click_threshold_clamped(void) {
     t.setClickThresholdDegrees(0.5f);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.5f, t.clickThresholdDegrees());
     t.setClickThresholdDegrees(99.0f);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 14.3f, t.clickThresholdDegrees());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 15.5f, t.clickThresholdDegrees());
     t.setClickThresholdDegrees(7.0f);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 7.0f, t.clickThresholdDegrees());
 }
@@ -269,6 +325,10 @@ int main(int, char**) {
     RUN_TEST(test_boundary_jitter_single_click);
     RUN_TEST(test_rearm_when_settled_near_original_rest);
     RUN_TEST(test_no_rearm_when_settled_far_from_original_rest);
+    RUN_TEST(test_autocal_fires_after_notflat_still);
+    RUN_TEST(test_autocal_does_not_fire_while_flat);
+    RUN_TEST(test_autocal_window_restarts_on_motion);
+    RUN_TEST(test_tap_overrides_autocal_mid_window);
     RUN_TEST(test_direction_lock_ignores_opposite_wobble);
     RUN_TEST(test_recal_resets_everything);
     RUN_TEST(test_click_threshold_clamped);
