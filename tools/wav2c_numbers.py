@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert assets/{one..twenty}.wav (Piper output) into
+"""Convert assets/{one..twenty_five}.wav (Piper output) into
 src/assets/numbers_audio.c - spoken click-threshold values.
 
 Each WAV is resampled to 16 kHz mono 16-bit, silence-trimmed, normalised, and
@@ -23,6 +23,8 @@ WORDS = {
     "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
     "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
     "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+    "twenty_one": 21, "twenty_two": 22, "twenty_three": 23, "twenty_four": 24,
+    "twenty_five": 25,
 }
 
 HERE = os.path.dirname(os.path.abspath(__file__))

@@ -27,8 +27,8 @@ future work — see `~/.claude/plans/shimmying-finding-whale.md`.
 | `src/main.cpp` | Board bring-up + wiring; 100 Hz sampling task on core 1, LVGL on core 0 | 🔨 compiles; runtime needs board |
 | `assets/Honu.png` | Waiting-screen image, original art | — |
 | `src/assets/Honu.c`, `src/assets/HonuBottom.c` | GIMP RGB565 C-source exports, compiled directly, each with a small documented wrapper (`honu_img` = waiting screen, `honu_bottom_img` = "Hold still" screen; ~305 KB flash each, no runtime conversion). `src/honu_img.h` declares both. | — |
-| `assets/{four..twelve}.wav` | Piper-synthesised spoken click-interval values (female voice). | — |
-| `src/assets/numbers_audio.c` | Generated from the WAVs by `tools/wav2c_numbers.py` (16 kHz mono 16-bit, trimmed/normalised, ~124 KB flash). `Clicker::playNumber()` speaks the value on `−`/`+`. Regenerate after editing the WAVs. | — |
+| `assets/{one..twenty_five}.wav` | Piper-synthesised spoken numbers (female voice) — see [Regenerating spoken-number audio](#regenerating-spoken-number-audio-piper). | — |
+| `src/assets/numbers_audio.c` | Generated from the WAVs by `tools/wav2c_numbers.py` (16 kHz mono 16-bit, trimmed/normalised). `Clicker::playNumber()` speaks the value on `−`/`+` and after a swing completes. Regenerate after editing the WAVs. | — |
 | `lib/Arduino_DriveBus/` | Vendored Waveshare FT3168 touch driver (not on the PlatformIO registry) | — |
 | `include/pin_config.h` | Full board pin map | — |
 | `include/lv_conf.h` | LVGL 9.3 config (from Waveshare's examples, demos off) | — |
@@ -60,6 +60,46 @@ Firmware:
 ```bash
 pio run -e esp32s3 -t upload -t monitor
 ```
+
+## Regenerating spoken-number audio (Piper)
+
+`assets/{one..twenty_five}.wav` are synthesised with
+[Piper](https://github.com/OHF-Voice/piper1-gpl) using the
+`en_US-hfc_female-medium` voice. The model (`en_US-hfc_female-medium.onnx`,
+~63 MB) and its `en_US-hfc_female-medium.onnx.json` config live in the repo
+root alongside the project files, not in `assets/` — that's where Piper looks
+for them by default.
+
+Install Piper (once):
+
+```bash
+pip install piper-tts
+```
+
+Synthesise a new number (run from the repo root, so Piper finds the model):
+
+```bash
+echo "twenty six" | python3 -m piper -m en_US-hfc_female-medium.onnx -f assets/twenty_six.wav
+```
+
+(`python3 -m piper` works even if the `piper` command itself isn't on `PATH`.)
+
+Preview a WAV before compiling it in:
+
+```bash
+afplay assets/twenty_six.wav
+```
+
+Then add the new word to `WORDS` in `tools/wav2c_numbers.py` (spelled-out word
+→ integer, matching the `.wav` filename) and regenerate:
+
+```bash
+python3 tools/wav2c_numbers.py
+```
+
+That rewrites `src/assets/numbers_audio.c`. `Clicker::maxSpokenNumber()`
+reads the new count directly, so nothing else needs to change for a bigger
+number to become speakable.
 
 ## On-device bring-up checklist (first flash)
 

@@ -196,6 +196,7 @@ void SwingTracker::processMonitoringSample(const MotionSample& s) {
                 stillnessRefGravity_ = g;
                 haveStillnessRef_ = true;
                 stillnessWindowStartMs_ = s.t_ms;
+                if (onSwingComplete) onSwingComplete(peakAngleThisSwing_);
             }
             break;
 

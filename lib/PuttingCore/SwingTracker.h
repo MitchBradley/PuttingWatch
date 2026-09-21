@@ -37,12 +37,12 @@ class SwingTracker {
         uint32_t accumulationMs = 2000;    // hold-still averaging window
         uint32_t monitoringDelayMs = 2000; // Done -> Monitoring auto-advance
         // Matches the UI's 1..16 "sensitivity level" mapping (main.cpp:
-        // kLevelBaseDegrees=3.5, kLevelStepDegrees=0.8, kLevelCount=16) -
+        // kLevelBaseDegrees=3.0, kLevelStepDegrees=0.9, kLevelCount=16) -
         // level 1 and level 16 respectively. Keep in sync if that mapping
         // changes; this class only ever reasons in degrees, the level is
         // purely a UI concept.
-        float clickThresholdDegreesMin = 3.5f;
-        float clickThresholdDegreesMax = 15.5f;
+        float clickThresholdDegreesMin = 3.0f;
+        float clickThresholdDegreesMax = 16.5f;
         float reversalDropDegrees = 2.0f;      // drop below peak => forward stroke
         uint32_t endOfSwingDelayMs = 2000;     // forward stroke held this long => recovering
         uint32_t stillnessDurationMs = 1000;   // continuous still time before re-arm
@@ -117,6 +117,11 @@ class SwingTracker {
     // Fired once when a calibration completes (Accumulating -> Done). Lets the
     // renderer play its "calibrated" cue.
     std::function<void()> onCalibrationComplete;
+    // Fired once per swing when ForwardStroke ends (-> Recovering), carrying
+    // that swing's peak backswing angle in degrees. Lets the renderer speak
+    // it; this class does no rounding/clamping to the speakable range, that's
+    // a renderer/UI concern (see Clicker::maxSpokenNumber).
+    std::function<void(float)> onSwingComplete;
 
   private:
     void enterMonitoring();

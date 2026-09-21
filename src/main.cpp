@@ -114,8 +114,8 @@ static uint32_t touchIgnoreUntilMs = 0;         // swallow the light-sleep wake 
 // which point this stops being a compile-time constant - see
 // SwingTracker::Config's clickThresholdDegreesMin/Max, which must stay in
 // sync with level 1 and kLevelCount, and onAdjustClickThreshold's clamp.
-static constexpr float kLevelBaseDegrees = 3.5f;  // level 1
-static constexpr float kLevelStepDegrees = 0.8f;  // degrees per level (N)
+static constexpr float kLevelBaseDegrees = 3.0f;  // level 1
+static constexpr float kLevelStepDegrees = 0.9f;  // degrees per level (N)
 static constexpr int kLevelCount = 16;
 static int levelForDegrees(float deg) {
     return (int)lroundf((deg - kLevelBaseDegrees) / kLevelStepDegrees) + 1;
@@ -513,6 +513,17 @@ void setup() {
     tracker.onClick = [] { clicker.playClick(); };
     // No calibration-complete cue here: the click interval is spoken from
     // loop() when the main (Monitoring) screen first appears - see below.
+    tracker.onSwingComplete = [](float peakDeg) {
+        // Inverse of degreesForLevel: report which sensitivity-level "index"
+        // the peak backswing reached, not the raw degree count - so the
+        // spoken number lines up with the same scale as the click threshold
+        // levels, not a bare angle.
+        int n = levelForDegrees(peakDeg);
+        if (n < 1) n = 1;
+        int maxN = clicker.maxSpokenNumber();
+        if (n > maxN) n = maxN;  // clamp and speak the boundary until more numbers are recorded
+        clicker.playNumber(n);
+    };
 
     xTaskCreatePinnedToCore(samplingTask, "sampling", 4096, nullptr, 2, nullptr, 0);
 

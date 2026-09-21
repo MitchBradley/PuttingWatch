@@ -22,6 +22,7 @@ class Clicker {
     void playTick();       // UI button confirm - short, lower pitch than the click
     void playBeep(int n);  // n longer tones - calibration cue
     void playNumber(int n);   // spoken number (whatever's compiled in); tone fallback
+    int maxSpokenNumber() const;  // highest n with a compiled-in sample; callers clamp to this
     void playCue(uint8_t id);  // named voice cue (CueId, e.g. CUE_READY); no-op if absent
 
     // NS4150B power-amp enable. Kept off except when sounds can actually play

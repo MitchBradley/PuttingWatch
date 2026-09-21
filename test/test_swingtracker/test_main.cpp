@@ -274,6 +274,42 @@ void test_tap_overrides_autocal_mid_window(void) {
     TEST_ASSERT_TRUE(t.state() == SwingTracker::State::Accumulating);
 }
 
+// onSwingComplete fires exactly once per swing, at the ForwardStroke ->
+// Recovering transition, carrying that swing's peak backswing angle.
+void test_swing_complete_fires_with_peak_angle(void) {
+    SwingTracker t;
+    t.setClickThresholdDegrees(6.0f);
+    uint32_t clock = 0;
+    calibrateIntoMonitoring(t, clock);
+
+    int fireCount = 0;
+    float lastPeak = -1.0f;
+    t.onSwingComplete = [&](float peakDeg) {
+        fireCount++;
+        lastPeak = peakDeg;
+    };
+
+    ramp(t, 0.0f, 25.0f, 60, clock);
+    ramp(t, 25.0f, 0.0f, 40, clock);
+    TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::ForwardStroke);
+    TEST_ASSERT_EQUAL_INT(0, fireCount);  // not yet - ForwardStroke hasn't ended
+
+    hold(t, 0.0f, 210, clock);  // past endOfSwingDelayMs -> ForwardStroke ends
+    TEST_ASSERT_EQUAL_INT(1, fireCount);
+    TEST_ASSERT_FLOAT_WITHIN(0.1f, 25.0f, lastPeak);
+
+    // Continue through re-arm and a second, smaller swing - fires again with
+    // the NEW peak, not the stale one, and still just once.
+    hold(t, 0.0f, 250, clock);  // finish the 1 s stillness -> re-arm
+    TEST_ASSERT_TRUE(t.isReadyForSwing());
+
+    ramp(t, 0.0f, 10.0f, 40, clock);
+    ramp(t, 10.0f, 0.0f, 40, clock);
+    hold(t, 0.0f, 210, clock);
+    TEST_ASSERT_EQUAL_INT(2, fireCount);
+    TEST_ASSERT_FLOAT_WITHIN(0.1f, 10.0f, lastPeak);
+}
+
 void test_direction_lock_ignores_opposite_wobble(void) {
     SwingTracker t;
     t.setClickThresholdDegrees(6.0f);
@@ -309,9 +345,9 @@ void test_direction_lock_ignores_opposite_wobble(void) {
 void test_click_threshold_clamped(void) {
     SwingTracker t;
     t.setClickThresholdDegrees(0.5f);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.5f, t.clickThresholdDegrees());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.0f, t.clickThresholdDegrees());
     t.setClickThresholdDegrees(99.0f);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 15.5f, t.clickThresholdDegrees());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 16.5f, t.clickThresholdDegrees());
     t.setClickThresholdDegrees(7.0f);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 7.0f, t.clickThresholdDegrees());
 }
@@ -329,6 +365,7 @@ int main(int, char**) {
     RUN_TEST(test_autocal_does_not_fire_while_flat);
     RUN_TEST(test_autocal_window_restarts_on_motion);
     RUN_TEST(test_tap_overrides_autocal_mid_window);
+    RUN_TEST(test_swing_complete_fires_with_peak_angle);
     RUN_TEST(test_direction_lock_ignores_opposite_wobble);
     RUN_TEST(test_recal_resets_everything);
     RUN_TEST(test_click_threshold_clamped);

@@ -168,6 +168,10 @@ void Clicker::playNumber(int n) {
     xQueueSend(queue_, &k, 0);
 }
 
+int Clicker::maxSpokenNumber() const {
+    return kNumberSamplesCount - 1;
+}
+
 void Clicker::playCue(uint8_t id) {
     if (!ok_) return;
     if (id >= CUE_COUNT || kCues[id].frames == 0) return;  // not compiled in - silent
