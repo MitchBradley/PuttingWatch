@@ -122,6 +122,15 @@ class SwingTracker {
     // it; this class does no rounding/clamping to the speakable range, that's
     // a renderer/UI concern (see Clicker::maxSpokenNumber).
     std::function<void(float)> onSwingComplete;
+    // Fired whenever the phase becomes Backswing while armed - both the
+    // initial arm (Done -> Monitoring) and every re-arm (Recovering ->
+    // Backswing). Diagnostic/UI marker for "ready" - lets the renderer log
+    // or cue it distinctly from the periodic state dump.
+    std::function<void()> onReady;
+    // Fired once per calibration, the moment the backswing direction lock
+    // latches (see Config::directionLockDegrees) - diagnostic only, carries
+    // the raw unsigned angle at the moment of the lock.
+    std::function<void(float)> onDirectionLocked;
 
   private:
     void enterMonitoring();

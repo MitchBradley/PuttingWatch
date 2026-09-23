@@ -510,7 +510,19 @@ void setup() {
     // tracker mutex). playClick() is just a non-blocking queue send to the
     // audio task, so fire it straight from here - the click stays tight to
     // the stroke regardless of what the core-1 loop() is doing. ---
-    tracker.onClick = [] { clicker.playClick(); };
+    // EVT lines below are event-triggered (unlike the once-a-second state
+    // dump in serialLog()) so a failure can be found by searching a captured
+    // log for "EVT" instead of having to catch it live - added to chase the
+    // "ready, then a real backswing produces no clicks" report.
+    tracker.onClick = [] {
+        clicker.playClick();
+        USBSerial.printf("[%lu] EVT click n=%d angle=%.1f\n", millis(), tracker.clickCount(),
+                          tracker.swingAngleDegrees());
+    };
+    tracker.onReady = [] { USBSerial.printf("[%lu] EVT ready\n", millis()); };
+    tracker.onDirectionLocked = [](float angleDeg) {
+        USBSerial.printf("[%lu] EVT dirlock angle=%.1f\n", millis(), angleDeg);
+    };
     // No calibration-complete cue here: the click interval is spoken from
     // loop() when the main (Monitoring) screen first appears - see below.
     tracker.onSwingComplete = [](float peakDeg) {
@@ -522,6 +534,7 @@ void setup() {
         if (n < 1) n = 1;
         int maxN = clicker.maxSpokenNumber();
         if (n > maxN) n = maxN;  // clamp and speak the boundary until more numbers are recorded
+        USBSerial.printf("[%lu] EVT swing peak=%.1f spoken=%d\n", millis(), peakDeg, n);
         clicker.playNumber(n);
     };
 

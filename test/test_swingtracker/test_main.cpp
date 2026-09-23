@@ -143,6 +143,37 @@ void test_small_swing_still_reverses(void) {
     TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::ForwardStroke);
 }
 
+// The on-course "ready, then a real backswing produces no clicks" report: a
+// tiny settle-into-address wobble right after re-arm (a couple of degrees of
+// hand tremor, well under clickThresholdDegreesMin) rising and falling back
+// to rest must NOT be read as a completed swing - reversalDropDegrees (2 deg)
+// alone is small enough that ordinary settling motion satisfies it, which
+// used to swallow the entire real stroke that followed (stuck in Recovering,
+// clicking impossible, confirmed via on-device EVT logging).
+void test_settle_wobble_does_not_complete_phantom_swing(void) {
+    SwingTracker t;
+    t.setClickThresholdDegrees(6.0f);
+    uint32_t clock = 0;
+    calibrateIntoMonitoring(t, clock);
+
+    int clicks = 0;
+    t.onClick = [&] { clicks++; };
+
+    // Settle wobble: peak 2.1 deg, well under clickThresholdDegreesMin (3.0).
+    ramp(t, 0.0f, 2.1f, 20, clock);
+    ramp(t, 2.1f, 0.0f, 20, clock);
+    TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::Backswing);
+    TEST_ASSERT_TRUE(t.isReadyForSwing());
+    TEST_ASSERT_EQUAL_INT(0, clicks);
+
+    // The real backswing that follows must still work normally - not
+    // swallowed by a phantom cycle the wobble would otherwise have started.
+    ramp(t, 0.0f, 25.0f, 60, clock);
+    TEST_ASSERT_EQUAL_INT(3, clicks);
+    ramp(t, 25.0f, 0.0f, 40, clock);
+    TEST_ASSERT_TRUE(t.swingPhase() == SwingTracker::SwingPhase::ForwardStroke);
+}
+
 // Jitter/dither across a threshold boundary must not double-click - the
 // on-device "can't get just one click, it clicks twice" report.
 void test_boundary_jitter_single_click(void) {
@@ -358,6 +389,7 @@ int main(int, char**) {
     RUN_TEST(test_backswing_clicks_then_reversal);
     RUN_TEST(test_max_clicks_per_swing_cap_resets_on_rearm);
     RUN_TEST(test_small_swing_still_reverses);
+    RUN_TEST(test_settle_wobble_does_not_complete_phantom_swing);
     RUN_TEST(test_boundary_jitter_single_click);
     RUN_TEST(test_rearm_when_settled_near_original_rest);
     RUN_TEST(test_no_rearm_when_settled_far_from_original_rest);

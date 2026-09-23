@@ -121,6 +121,7 @@ void SwingTracker::enterMonitoring() {
     directionRef_ = Vec3{0, 0, 0};
     forwardStrokeStartMs_ = 0;
     haveStillnessRef_ = false;
+    if (onReady) onReady();
 }
 
 // Ported from CalibrationManager.processMonitoringSample. `angle` is the
@@ -147,6 +148,7 @@ void SwingTracker::processMonitoringSample(const MotionSample& s) {
                 if (angle >= cfg_.directionLockDegrees) {
                     directionRef_ = deviation;
                     haveDirectionRef_ = true;
+                    if (onDirectionLocked) onDirectionLocked(angle);
                 }
             } else if (deviation.dot(directionRef_) <= 0.0f) {
                 effectiveAngle = 0.0f;
@@ -180,7 +182,23 @@ void SwingTracker::processMonitoringSample(const MotionSample& s) {
             // the phase machine would never leave Backswing and clicks would
             // fire straight through the follow-through too. (Bug fixed in the
             // Swift app, commit 3bd9688.)
-            if (effectiveAngle <= peakAngleThisSwing_ - cfg_.reversalDropDegrees) {
+            //
+            // But peak alone isn't enough of a gate on its own: reversalDrop
+            // (2 deg) is small enough that ordinary settling-into-address
+            // motion right after a re-arm - just a couple of degrees of hand
+            // tremor rising and falling back to rest - satisfies it on its
+            // own. That completes a whole phantom Backswing -> ForwardStroke
+            // -> Recovering cycle before the golfer's real stroke even
+            // starts, leaving the tracker stuck in Recovering (clicking
+            // impossible) through the entire real swing that follows -
+            // silent misses, confirmed on-device via the EVT log. Gate on
+            // clickThresholdDegreesMin too: a swing too small to ever fire
+            // even the most sensitive click is indistinguishable from noise,
+            // so don't let it complete a reversal at all - just keep
+            // tracking Backswing, and a real swing that follows continues
+            // growing the same peak normally.
+            if (peakAngleThisSwing_ >= cfg_.clickThresholdDegreesMin &&
+                effectiveAngle <= peakAngleThisSwing_ - cfg_.reversalDropDegrees) {
                 swingPhase_ = SwingPhase::ForwardStroke;
                 forwardStrokeStartMs_ = s.t_ms;
             }
@@ -227,6 +245,7 @@ void SwingTracker::processMonitoringSample(const MotionSample& s) {
                     peakAngleThisSwing_ = 0.0f;
                     forwardStrokeStartMs_ = 0;
                     haveStillnessRef_ = false;
+                    if (onReady) onReady();
                 }
                 // else: still, but too far from the original rest to trust.
                 // Stay in Recovering; re-checked every sample, so it re-arms
