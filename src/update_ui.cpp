@@ -224,8 +224,11 @@ View viewFor(const wifiota::Status& st, bool batteryOk) {
             } else {
                 snprintf(buf, sizeof(buf), "WIFI:T:WPA;S:%s;P:%s;;", st.apSsid, st.apPass);
                 v.qrData = buf;
+                // No manual line break in the instruction: it wraps by itself
+                // into two balanced lines, whereas "...camera,\nthen tap Join"
+                // wrapped into three with "camera," stranded alone.
                 v.body = st.error[0] ? std::string(st.error) + "\nScan to try again."
-                                     : "Scan with your phone's camera,\nthen tap Join";
+                                     : "Scan with your phone's camera, then tap Join";
             }
             snprintf(buf, sizeof(buf), "Or join %s\nPassword: %s", st.apSsid, st.apPass);
             v.note = buf;
@@ -266,10 +269,16 @@ View viewFor(const wifiota::Status& st, bool batteryOk) {
             break;
         case Phase::NeedsUsbInstall:
             v.title = "USB install\nneeded";
-            snprintf(buf, sizeof(buf),
-                     "Version %s can't be installed from the watch.\nOn a computer, open\n%s",
-                     st.version, siteWithoutScheme());
-            v.body = buf;
+            {
+                // Host and path on separate lines: together they are wider than
+                // the screen and would break in the middle of the host name.
+                const std::string site = siteWithoutScheme();
+                const size_t slash = site.find('/');
+                v.body = std::string("Version ") + st.version +
+                         " can't be installed from the watch.\nOn a computer, open\n" +
+                         site.substr(0, slash);
+                if (slash != std::string::npos) v.body += "\n" + site.substr(slash);
+            }
             v.secondary = "Close";
             break;
         case Phase::Downloading:

@@ -61,6 +61,23 @@ Firmware:
 pio run -e esp32s3 -t upload -t monitor
 ```
 
+## Screenshots for the user guide
+
+`docs/screens/` holds a capture of every screen (putting app and update mode),
+rendered from the real `src/ui.cpp` and `src/update_ui.cpp` rather than
+photographed - same fonts, layout, colours and QR codes, without needing the
+watch. Regenerate after any layout change:
+
+```bash
+python3 tools/screenshots/render_screens.py
+```
+
+It builds LVGL as a desktop program once (about a minute, cached in
+`.pio/screenshots/`) and then takes a few seconds. Needs LVGL's sources, which
+`pio run -e esp32c6` fetches. To add a screen, add a scene to
+`tools/screenshots/screens.cpp`. The physical panel's rounded corners are not
+reproduced.
+
 ## Regenerating spoken-number audio (Piper)
 
 `assets/{one..twenty_five}.wav` are synthesised with
