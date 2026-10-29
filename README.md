@@ -24,7 +24,7 @@ them harder, and vice versa.
 
 You can wear the watch on either wrist, facing either up or down.  It
 can be convenient to wear it opposite from your regular watch (so you
-don't have to remove you other watch), and on the inside of your wrist
+don't have to remove your other watch), and on the inside of your wrist
 so you can see it in the address position, but the watch doesn't care
 either way.  When you turn it on, you tap it to calibrate at rest
 orientation - it looks for a few seconds of stillness and figures out
@@ -46,7 +46,7 @@ approximate due to variation in green speed and golfers.  Regardless,
 a threshold of 1 is a very short putt, while 12 is quite a long one.
 
 The objective is to set the threshold according to the length of the
-putt you are practicising, then make a well-controller backswing such
+putt you are practicing, then make a well-controlled backswing such
 that the watch clicks exactly once before the forward stroke.  If the
 watch clicks twice (or even more times), it means that your stroke was
 twice as long as necessary.  This is very common with a jerky putting
@@ -58,14 +58,14 @@ to make it click just once.
 To smooth out your stroke, practice a very slow backswing until you hear
 a click, then begin the forward stroke gently.  Initially this will be
 easier at large threshold values.  As your control improves, you can
-move to smaller thresholds and shorter distances.l
+move to smaller thresholds and shorter distances.
 
 After some practice, your putting stroke will be silky smooth and you
 will feel the backswing length for different length putts.  You will
 know just what a one-click stroke at a given setting feels like, and
 you can imagine exactly when the click will happen.  You will then
-control distance solely by backwing length, without thinking that you
-need need to hit putts harder or softer.
+control distance solely by backswing length, without thinking that you
+need to hit putts harder or softer.
 
 ## Layout
 
