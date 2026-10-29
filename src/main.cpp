@@ -177,6 +177,7 @@ static float degreesForLevel(int level) {
 
 static constexpr uint8_t  kBrightFull     = 0xD0;  // CO5300 init value
 static constexpr uint32_t kBrightHoldMs   = 5000;
+static constexpr uint32_t kByeMs          = 3000;  // Bye screen (with its Update button) before power-off
 static constexpr uint32_t kWakeSwallowMs  = 400;   // ignore touches this long after a wake
 static constexpr uint32_t kDoubleTapMs    = 400;
 static constexpr uint32_t kBlankedLoopMs  = 25;    // core-1 loop period while blanked
@@ -418,7 +419,15 @@ static void enterPmuShutdown() {
         runScreenBlanked = false;
     }
 
-    delay(600);
+    // Hold the Bye screen long enough to press its Update button (which
+    // reboots into update mode instead of powering off). The tap that pressed
+    // Stop must not land on Update, so swallow touches for the first moment.
+    touch->IIC_Interrupt_Flag = false;
+    touchIgnoreUntilMs = millis() + 500;
+    for (uint32_t t0 = millis(); millis() - t0 < kByeMs;) {
+        lv_timer_handler();  // services the button; a press restarts the chip from here
+        delay(10);
+    }
 
     USBSerial.flush();
     delay(20);
@@ -587,7 +596,7 @@ void setup() {
         return;
     }
 
-    ui::init();
+    ui::init(FW_VERSION);
     wireUiHooks();
 
     if (!clicker.begin()) USBSerial.println("Clicker/ES8311 init failed - audio disabled");

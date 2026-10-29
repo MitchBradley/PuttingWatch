@@ -156,9 +156,13 @@ python3 tools/make_release_site.py --version 0.1.0 --base-url http://localhost:8
 
 ## Updating the watch over Wi-Fi
 
-**For users:** on the first screen ("Tap when in putting position") tap
-**Update** in the lower-right corner. The watch restarts into *update mode*
-(its own screens; the putting app is not running).
+**For users:** tap **Stop** (or press BOOT). The "Bye" screen stays up for a
+few seconds with an **Update** button; tap it and the watch restarts into
+*update mode* (its own screens; the putting app is not running). Doing nothing
+powers the watch off as usual. The button is deliberately on that screen and
+not the "Tap when in putting position" one: that tap usually happens with the
+watch out of sight, where an accidental press is far too easy. (The firmware
+version is shown in the corner of that first screen.)
 
 1. **First time only - Wi-Fi setup.** The screen shows a QR code. Scan it with
    the phone's camera and tap *Join*; a setup page opens by itself (if it
@@ -206,7 +210,7 @@ release, so the first run needs one:
 2. USB-flash any development build (`pio run -e esp32c6 -t upload`). A build
    whose version isn't a plain `X.Y.Z` (e.g. `0.1.0-3-gabc1234-dirty`) counts
    as a development build and is offered whatever release is published.
-3. Tap **Update**. Watch the serial log for `[ota ...]` lines: `phase`
+3. Tap **Stop**, then **Update** on the Bye screen. Watch the serial log for `[ota ...]` lines: `phase`
    changes, `setup AP ...`, `manifest: version ... (running ...)`,
    `downloading ...`, `installed ... - restarting`, and then on the next boot
    `OTA image ... confirmed valid`.

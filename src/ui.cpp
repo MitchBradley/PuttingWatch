@@ -30,7 +30,8 @@ lv_obj_t* battBar = nullptr;
 lv_obj_t* battLabel = nullptr;
 lv_obj_t* minusBtn = nullptr;
 lv_obj_t* plusBtn = nullptr;
-lv_obj_t* updateBtn = nullptr;      // waiting screen only: reboot into firmware-update mode
+lv_obj_t* updateBtn = nullptr;      // Bye screen only: reboot into firmware-update mode
+lv_obj_t* versionLabel = nullptr;   // waiting screen only: firmware version, bottom-right
 lv_obj_t* byeLabel = nullptr;
 
 // Background colours, matching ContentView.swift's palette intent.
@@ -92,7 +93,7 @@ lv_obj_t* makeButton(const char* text, lv_event_cb_t cb, lv_align_t align, int d
 
 }  // namespace
 
-void init() {
+void init(const char* firmwareVersion) {
     root = lv_screen_active();
     lv_obj_set_style_bg_color(root, lv_color_hex(kBgWaiting), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
@@ -154,14 +155,28 @@ void init() {
     lv_obj_add_flag(minusBtn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(plusBtn, LV_OBJ_FLAG_HIDDEN);
 
-    // "Update": bottom-right corner of the waiting screen, over the empty
-    // corner of the Honu image. A small, quiet button - it's used rarely, and
-    // a tap anywhere else here starts calibration. Hidden until the first
-    // render picks the screen, like the buttons above.
-    updateBtn = makeButton("Update", updateClicked, LV_ALIGN_BOTTOM_RIGHT, -22, -30, 128, 58,
-                           &lv_font_montserrat_24);
+    // "Update": on the Bye screen only, below the "Bye" text. Not on the "Tap
+    // when in putting position" screen, where it was too easy to hit by
+    // accident (that tap usually happens with the watch out of sight). Hidden
+    // until showByeScreen().
+    updateBtn = makeButton("Update", updateClicked, LV_ALIGN_CENTER, 0, 110, 240, 76,
+                           &lv_font_montserrat_32);
     lv_obj_set_style_bg_color(updateBtn, lv_color_hex(0x3A3A3A), 0);
     lv_obj_add_flag(updateBtn, LV_OBJ_FLAG_HIDDEN);
+
+    // Firmware version, bottom-right of the waiting screen over the empty
+    // corner of the Honu image. Static text, set once. Starts hidden so it
+    // can't flash on other screens before the first render picks one.
+    versionLabel = lv_label_create(root);
+    lv_obj_set_style_text_font(versionLabel, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(versionLabel, lv_color_hex(0x707070), 0);
+    char ver[40];
+    // Release builds are "0.1.0" -> "v0.1.0"; development builds ("4bd9850-dirty") as-is.
+    snprintf(ver, sizeof(ver), "%s%s", (firmwareVersion && firmwareVersion[0] >= '0' && firmwareVersion[0] <= '9') ? "v" : "",
+             firmwareVersion ? firmwareVersion : "");
+    lv_label_set_text(versionLabel, ver);
+    lv_obj_align(versionLabel, LV_ALIGN_BOTTOM_RIGHT, -30, -22);
+    lv_obj_add_flag(versionLabel, LV_OBJ_FLAG_HIDDEN);
 
     // Every dynamic label gets a FIXED box (full width, fixed height, fixed
     // position) with the text centred inside it - see the note in render():
@@ -215,9 +230,11 @@ void showByeScreen() {
     setHidden(battLabel, true);
     setHidden(minusBtn, true);
     setHidden(plusBtn, true);
-    setHidden(updateBtn, true);
+    setHidden(versionLabel, true);
     setHidden(byeLabel, false);
+    setHidden(updateBtn, false);
     lv_obj_move_foreground(byeLabel);
+    lv_obj_move_foreground(updateBtn);
     lv_refr_now(nullptr);  // force the flush now - normal render() cadence
                             // (~20 Hz) may not get another chance to run
 }
@@ -297,7 +314,7 @@ void render(const Snapshot& s) {
     // up (kBattYWaiting) to clear the Honu image just beneath it.
     bool showBatt = showTopBtns || s.state == State::WaitingForCalibration;
     bool battOnWaitScreen = s.state == State::WaitingForCalibration;
-    bool showUpdate = showWait && !showBottom;  // the waiting screen only, not "Hold still"
+    bool showVersion = showWait && !showBottom;  // the waiting screen only, not "Hold still"
 
     if (strcmp(status, lastStatus)) {
         strcpy(lastStatus, status);
@@ -345,7 +362,7 @@ void render(const Snapshot& s) {
 
     int vis = (showBig ? 1 : 0) | (showThresh ? 2 : 0) | (showTopBtns ? 4 : 0) |
               (showNudge ? 8 : 0) | (showWait ? 16 : 0) | (showBottom ? 32 : 0) |
-              (showBatt ? 64 : 0) | (showUpdate ? 128 : 0);
+              (showBatt ? 64 : 0) | (showVersion ? 128 : 0);
     if (vis != lastVis) {
         lastVis = vis;
         setHidden(honuImg, !showWait || showBottom);
@@ -360,7 +377,7 @@ void render(const Snapshot& s) {
         setHidden(battLabel, !showBatt);
         setHidden(minusBtn, !showNudge);
         setHidden(plusBtn, !showNudge);
-        setHidden(updateBtn, !showUpdate);
+        setHidden(versionLabel, !showVersion);
     }
 }
 
