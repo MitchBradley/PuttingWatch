@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PuttingWatch firmware</title>
+<style>
+  :root { color-scheme: light dark; --accent: #1b7f3b; }
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 0 auto; padding: 1.5rem 16px 3rem; }
+  h1 { margin-bottom: .25rem; }
+  h2 { margin-top: 2rem; font-size: 1.15rem; }
+  .meta { color: GrayText; margin-top: 0; }
+  .notes { font-weight: 600; }
+  ol { padding-left: 1.25rem; }
+  li { margin: .5rem 0; }
+  .install { margin: 1.5rem 0; padding: 1.25rem 1rem; text-align: center;
+             border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: .75rem; }
+  esp-web-install-button { --esp-tools-button-color: var(--accent); }
+  small { color: GrayText; }
+</style>
+</head>
+<body>
+<h1>PuttingWatch</h1>
+<p class="meta">Firmware {{VERSION}} &middot; {{RELEASED}}</p>
+{{NOTES_HTML}}
+
+<h2>Install or reinstall with a USB cable</h2>
+<ol>
+  <li>Use <strong>Chrome or Edge on a computer</strong>. Safari, Firefox and phones can't do this.</li>
+  <li>Connect the watch to the computer with its USB-C cable.</li>
+  <li>Click <strong>Connect</strong> below and choose the watch from the list that pops up.</li>
+  <li>Choose <strong>Install PuttingWatch</strong> and follow the prompts.</li>
+  <li>Keep the cable connected until it says it has finished.</li>
+</ol>
+
+<div class="install">
+  <esp-web-install-button manifest="webtools-manifest.json">
+    <span slot="unsupported">This browser can't install firmware. Please use Chrome or Edge on a computer.</span>
+    <span slot="not-allowed">Installing firmware needs a secure (https) page.</span>
+  </esp-web-install-button>
+</div>
+
+<p><small>Only tick "Erase device" for a completely fresh start, or to fix a watch that is misbehaving &mdash; it also clears saved settings.</small></p>
+<p><small><a href="{{REPO_URL}}/releases">All releases</a></small></p>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+</body>
+</html>

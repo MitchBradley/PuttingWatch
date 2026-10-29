@@ -101,6 +101,59 @@ That rewrites `src/assets/numbers_audio.c`. `Clicker::maxSpokenNumber()`
 reads the new count directly, so nothing else needs to change for a bigger
 number to become speakable.
 
+## Releasing firmware
+
+Pushing a version tag builds, tests and publishes a release
+(`.github/workflows/release.yml`). The version number comes from the tag alone
+(`tools/fw_version.py` turns `git describe` into `FW_VERSION`) - there is
+nothing in the source to bump.
+
+**One-time GitHub setup** (the workflow can't do these):
+
+1. Settings → Pages → Source: **GitHub Actions**.
+2. Settings → Environments → `github-pages` → Deployment branches and tags →
+   add a tag rule `v*`. By default only the default branch may deploy to that
+   environment, which rejects a tag-triggered deploy.
+
+**To release:**
+
+```bash
+git tag -a v0.1.0 -m "One-line summary, shown on the install page"
+git push origin v0.1.0
+```
+
+Tags must look like `v1.2.3` or `v1.2.3-beta.1` (a `-` marks a GitHub
+pre-release). The workflow runs the unit tests, builds `esp32c6`, checks the
+firmware's own version string equals the tag, then publishes:
+
+| What | Where | For |
+|---|---|---|
+| `firmware-<ver>.factory.bin` | GitHub Release asset | full image (bootloader + partitions + app), USB install |
+| `firmware-<ver>.bin` | GitHub Release asset | app image only; permanent archive of every release |
+| `https://<owner>.github.io/PuttingWatch/` | GitHub Pages | USB install page (ESP Web Tools: Chrome/Edge + cable) |
+| `.../manifest.json` | GitHub Pages | what the watch reads to find the newest update |
+| `.../firmware/<ver>/firmware.bin` | GitHub Pages | the image the watch downloads |
+
+Pages only ever holds the newest release. "Run workflow" on the Actions tab
+builds and tests without publishing - a quick way to check CI is healthy.
+
+`manifest.json` carries `version`, `url`, `size`, `sha256`, `min_version`,
+`released` and `notes`. Watches in the field depend on it, so **only ever add
+optional fields to it - never rename or repurpose one.**
+
+`release/min_ota_version.txt` becomes the manifest's `min_version`: the oldest
+installed firmware allowed to update over the air. Raise it for any release
+that can't be applied over the air to older firmware - above all when the
+partition table changes, which only a USB install can fix.
+
+Preview the install page locally (no GitHub needed):
+
+```bash
+python3 tools/make_release_site.py --version 0.1.0 --base-url http://localhost:8000/ \
+  --firmware .pio/build/esp32c6/firmware.bin --factory .pio/build/esp32c6/firmware.factory.bin \
+  --template release/index.template.html --out /tmp/site && cd /tmp/site && python3 -m http.server 8000
+```
+
 ## On-device bring-up checklist (first flash)
 
 1. Screen shows the Honu image centred on white with "Tap when in putting

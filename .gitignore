@@ -12,3 +12,6 @@ compile_commands.json
 # Python bytecode cache (tools/)
 __pycache__/
 *.pyc
+
+# Generated at build time by tools/fw_version.py
+include/fw_version.h

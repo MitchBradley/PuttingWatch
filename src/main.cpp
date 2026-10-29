@@ -18,6 +18,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <esp_heap_caps.h>
+#include <esp_ota_ops.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
 #include <driver/gpio.h>
@@ -37,7 +38,40 @@
 #include "Battery.h"
 #include "ui.h"
 
+// Generated at build time by tools/fw_version.py (git describe); other envs
+// that don't run that script just report "dev".
+#if __has_include("fw_version.h")
+#include "fw_version.h"
+#endif
+#ifndef FW_VERSION
+#define FW_VERSION "dev"
+#endif
+
 HWCDC USBSerial;
+
+// OTA rollback. The Arduino core normally marks a freshly-OTA'd image valid
+// the instant it starts, before any of our code has run, which would make
+// rollback pointless. Deferring that (this hook is weak in the core, and
+// called from C) lets setup() confirm the hardware actually came up first; if
+// the image crashes or resets before then, the bootloader reverts to the
+// previous firmware on its own.
+extern "C" bool verifyRollbackLater() { return true; }
+
+static void confirmFirmware(bool healthy) {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(running, &state) != ESP_OK ||
+        state != ESP_OTA_IMG_PENDING_VERIFY)
+        return;  // USB-flashed or already confirmed - nothing to decide
+    if (healthy) {
+        esp_ota_mark_app_valid_cancel_rollback();
+        USBSerial.printf("OTA image %s confirmed valid\n", FW_VERSION);
+    } else {
+        USBSerial.println("OTA image failed its self-check - rolling back");
+        USBSerial.flush();
+        esp_ota_mark_app_invalid_rollback_and_reboot();
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Display: CO5300 AMOLED over QSPI (offsets from Waveshare's own example).
@@ -450,8 +484,9 @@ void setup() {
     USBSerial.setTxTimeoutMs(0);
     // Diagnostic for the deep-sleep-drain question: reset reason 8 =
     // ESP_RST_DEEPSLEEP; wakeup cause 3 = ESP_SLEEP_WAKEUP_EXT1 (BOOT button).
-    USBSerial.printf("\nPuttingWatch booting (reset=%d wake=%d)\n",
-                     (int)esp_reset_reason(), (int)esp_sleep_get_wakeup_cause());
+    USBSerial.printf("\nPuttingWatch %s booting from %s (reset=%d wake=%d)\n", FW_VERSION,
+                     esp_ota_get_running_partition()->label, (int)esp_reset_reason(),
+                     (int)esp_sleep_get_wakeup_cause());
 
     // Release any pad holds left latched by a prior deep sleep (see
     // enterDeepSleep) before anything reconfigures those pins.
@@ -462,7 +497,8 @@ void setup() {
 
     trackerMux = xSemaphoreCreateMutex();
 
-    if (!gfx->begin()) USBSerial.println("gfx->begin() failed");
+    const bool gfxOk = gfx->begin();
+    if (!gfxOk) USBSerial.println("gfx->begin() failed");
     gfx->fillScreen(BLACK);
 
     Wire.begin(IIC_SDA, IIC_SCL, 400000);
@@ -539,6 +575,12 @@ void setup() {
     };
 
     xTaskCreatePinnedToCore(samplingTask, "sampling", 4096, nullptr, 2, nullptr, 0);
+
+    // Display + IMU are the two things the watch is useless without. Touch
+    // is deliberately not part of the check: its begin() can fail transiently
+    // right after a reset (see the FT3168 notes above), and a spurious
+    // rollback of a good update would be worse than a rare missed touch.
+    confirmFirmware(gfxOk && imuOk);
 
     USBSerial.printf("setup done (imu=%d)\n", imuOk);
 }

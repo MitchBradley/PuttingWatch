@@ -1,0 +1,140 @@
+name: Release
+
+# Push a tag like v0.1.0 (or v0.2.0-beta.1) to build, test and publish:
+#   - a GitHub Release with the firmware images attached (permanent archive)
+#   - the GitHub Pages site: USB install page + manifest.json for over-the-air
+#     updates (holds only the newest release)
+# "Run workflow" from the Actions tab does the build and tests only - handy for
+# checking CI works before tagging; nothing is published.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # git describe (firmware version) needs the tags
+
+      - name: Check tag format
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          re='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+          if ! [[ "$GITHUB_REF_NAME" =~ $re ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' must look like v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - run: pip install platformio==6.1.19
+
+      - name: Unit tests
+        run: pio test -e native
+
+      - name: Build firmware
+        run: pio run -e esp32c6
+
+      - name: Check the built version matches the tag
+        id: ver
+        run: |
+          built=$(sed -n 's/.*FW_VERSION "\(.*\)".*/\1/p' include/fw_version.h)
+          echo "firmware reports: $built"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            expected="${GITHUB_REF_NAME#v}"
+            if [[ "$built" != "$expected" ]]; then
+              echo "::error::firmware reports '$built' but the tag says '$expected'"
+              exit 1
+            fi
+          fi
+          echo "version=$built" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            .pio/build/esp32c6/firmware.bin
+            .pio/build/esp32c6/firmware.factory.bin
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the GitHub Release
+      pages: write      # deploy the site
+      id-token: write   # required by deploy-pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tag message is the release summary
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: dist
+
+      - name: Assemble site
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          notes="$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")"
+          min="$(grep -v '^#' release/min_ota_version.txt | head -n1 | tr -d '[:space:]')"
+          python3 tools/make_release_site.py \
+            --version "$VERSION" \
+            --min-version "$min" \
+            --base-url "https://${owner}.github.io/${repo}/" \
+            --repo-url "https://github.com/${GITHUB_REPOSITORY}" \
+            --firmware dist/firmware.bin \
+            --factory dist/firmware.factory.bin \
+            --template release/index.template.html \
+            --notes "$notes" \
+            --out site
+          cat site/manifest.json
+
+      # Release before Pages: Pages is what makes the update visible to
+      # watches, so it goes last - a failure above never reaches a device.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp dist/firmware.bin "firmware-${VERSION}.bin"
+          cp dist/firmware.factory.bin "firmware-${VERSION}.factory.bin"
+          flags=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" \
+            --title "PuttingWatch ${VERSION}" --generate-notes \
+            "firmware-${VERSION}.bin" "firmware-${VERSION}.factory.bin"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
