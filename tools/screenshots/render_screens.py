@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render every PuttingWatch screen to PNG, for the user guide.
+"""Render every Honu Watch screen to PNG, for the user guide.
 
     python3 tools/screenshots/render_screens.py [--out docs/screens] [--montage FILE]
 

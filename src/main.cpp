@@ -526,7 +526,7 @@ void setup() {
     USBSerial.setTxTimeoutMs(0);
     // Diagnostic for the deep-sleep-drain question: reset reason 8 =
     // ESP_RST_DEEPSLEEP; wakeup cause 3 = ESP_SLEEP_WAKEUP_EXT1 (BOOT button).
-    USBSerial.printf("\nPuttingWatch %s booting from %s (reset=%d wake=%d)\n", FW_VERSION,
+    USBSerial.printf("\nHonu Watch %s booting from %s (reset=%d wake=%d)\n", FW_VERSION,
                      esp_ota_get_running_partition()->label, (int)esp_reset_reason(),
                      (int)esp_sleep_get_wakeup_cause());
 

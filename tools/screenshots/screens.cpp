@@ -1,4 +1,4 @@
-// Headless renderer for every PuttingWatch screen, for the user guide.
+// Headless renderer for every Honu Watch screen, for the user guide.
 //
 // Drives the REAL src/ui.cpp (putting app) and src/update_ui.cpp (update
 // mode) on the host with a software-rendered LVGL display, so the captures
@@ -179,7 +179,7 @@ static void updateModeScreens() {
 
     st = Status();
     st.phase = Phase::Provisioning;
-    copy(st.apSsid, sizeof(st.apSsid), "PuttingWatch-A1B2");
+    copy(st.apSsid, sizeof(st.apSsid), "HonuWatch-A1B2");
     copy(st.apPass, sizeof(st.apPass), "K7M2QX9TRN");
     showUpdate("update-02-setup-scan-to-join", st);
 

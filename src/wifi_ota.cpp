@@ -190,7 +190,7 @@ void scanNetworks() {
 const char kPageHead[] =
     "<!doctype html><html lang=en><head><meta charset=utf-8>"
     "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
-    "<title>PuttingWatch Wi-Fi</title><style>"
+    "<title>Honu Watch Wi-Fi</title><style>"
     ":root{color-scheme:light dark}"
     "body{font:18px/1.45 system-ui,sans-serif;max-width:30rem;margin:0 auto;padding:20px}"
     "h1{font-size:1.45rem;margin:.2rem 0 .6rem}"
@@ -292,7 +292,7 @@ int beginGet(HTTPClient& http, NetworkClientSecure& client, const char* url) {
     // HTTP/1.0: the server must send Content-Length rather than chunked
     // encoding, which the streaming download below relies on.
     http.useHTTP10(true);
-    http.setUserAgent(String("PuttingWatch/") + gRunningVersion);
+    http.setUserAgent(String("HonuWatch/") + gRunningVersion);
     http.setConnectTimeout(kHttpTimeoutMs);
     http.setTimeout(kHttpTimeoutMs);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
@@ -351,7 +351,7 @@ Next doProvision() {
     uint8_t mac[6] = {0};
     esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     char apSsid[24];
-    snprintf(apSsid, sizeof(apSsid), "PuttingWatch-%02X%02X", mac[4], mac[5]);
+    snprintf(apSsid, sizeof(apSsid), "HonuWatch-%02X%02X", mac[4], mac[5]);
 
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));

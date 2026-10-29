@@ -97,7 +97,7 @@ def main():
     })
 
     write_json(os.path.join(a.out, "webtools-manifest.json"), {
-        "name": "PuttingWatch",
+        "name": "Honu Watch",
         "version": a.version,
         "new_install_prompt_erase": True,
         "builds": [{

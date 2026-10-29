@@ -129,7 +129,7 @@ jobs:
           flags=()
           [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${flags[@]}" \
-            --title "PuttingWatch ${VERSION}" --generate-notes \
+            --title "Honu Watch ${VERSION}" --generate-notes \
             "firmware-${VERSION}.bin" "firmware-${VERSION}.factory.bin"
 
       - uses: actions/upload-pages-artifact@v3
