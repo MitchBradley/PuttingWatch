@@ -154,6 +154,68 @@ python3 tools/make_release_site.py --version 0.1.0 --base-url http://localhost:8
   --template release/index.template.html --out /tmp/site && cd /tmp/site && python3 -m http.server 8000
 ```
 
+## Updating the watch over Wi-Fi
+
+**For users:** on the first screen ("Tap when in putting position") tap
+**Update** in the lower-right corner. The watch restarts into *update mode*
+(its own screens; the putting app is not running).
+
+1. **First time only - Wi-Fi setup.** The screen shows a QR code. Scan it with
+   the phone's camera and tap *Join*; a setup page opens by itself (if it
+   doesn't, the watch shows a second QR code that opens it). Pick the home
+   Wi-Fi, type its password, tap *Connect*, and look back at the watch. Only
+   2.4 GHz networks work. The password is remembered; later updates skip this.
+2. The watch checks for a newer version and offers it. **Install** downloads
+   and installs it, then restarts by itself.
+
+*Cancel* (or the BOOT button) returns to the putting app at any time, and is
+always safe. Install needs a battery of at least 40%, or a charger plugged in.
+Use *Change Wi-Fi* on the result screens to pick a different network.
+
+**How it works** (all of it only runs in update mode):
+
+| Piece | Where |
+|---|---|
+| Version ordering, manifest parsing, the "offer an update?" decision, battery gate | `lib/UpdateCore/` - pure C++, host-tested (`test/test_updatecore`) |
+| Wi-Fi scan, setup access point + captive-portal page, join, clock sync, HTTPS fetch/download, install - one FreeRTOS task | `src/wifi_ota.*` |
+| Update-mode screens and QR codes (a view over `wifiota::status()`) | `src/update_ui.*` |
+| Reboot into update mode | `main.cpp`: a one-shot magic word in RTC memory, cleared as soon as it is read, so a power cycle or crash always returns to the normal app |
+| Where updates come from | `include/update_config.h` (`OTA_SITE_URL`, the GitHub Pages site the release workflow publishes) |
+
+Safety properties worth knowing before changing any of this:
+
+- **TLS is verified** against the core's CA bundle (and hostname). Do not
+  switch to `HTTPClient::begin(url)` without a CA: that silently disables
+  certificate checking.
+- The download is hashed as it streams and compared with the manifest's
+  SHA-256; the image's own checksum is checked again by `Update.end()`. The
+  running firmware is only replaced when that final step succeeds, so
+  cancelling or losing power mid-download is harmless.
+- A freshly installed image must pass its self-check in `setup()` (display and
+  IMU up) or the bootloader rolls back - see `confirmFirmware()` in `main.cpp`.
+- The setup access point is WPA2 with a one-time password carried in the QR
+  code, because the home Wi-Fi password is typed into a page served over it.
+- Network names are HTML-escaped (`updatecore::htmlEscape`): they are
+  attacker-controlled input in the setup page.
+
+**Testing it end to end.** The watch can only update from a *published*
+release, so the first run needs one:
+
+1. Do the one-time GitHub setup and push a tag (see *Releasing firmware*), so
+   `manifest.json` exists on the Pages site.
+2. USB-flash any development build (`pio run -e esp32c6 -t upload`). A build
+   whose version isn't a plain `X.Y.Z` (e.g. `0.1.0-3-gabc1234-dirty`) counts
+   as a development build and is offered whatever release is published.
+3. Tap **Update**. Watch the serial log for `[ota ...]` lines: `phase`
+   changes, `setup AP ...`, `manifest: version ... (running ...)`,
+   `downloading ...`, `installed ... - restarting`, and then on the next boot
+   `OTA image ... confirmed valid`.
+4. To test a genuine version bump, tag and publish a newer release and update
+   again from the previous one.
+
+To point a build at a different update site, override `OTA_SITE_URL` with a
+`-D` flag. It must be `https://` with a publicly trusted certificate.
+
 ## On-device bring-up checklist (first flash)
 
 1. Screen shows the Honu image centred on white with "Tap when in putting

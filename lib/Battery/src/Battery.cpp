@@ -30,6 +30,10 @@ int Battery::millivolts() {
     return (int)pmu.getBattVoltage();
 }
 
+bool Battery::externalPower() {
+    return ok_ && pmu.isVbusIn();
+}
+
 void Battery::shutdown() {
     if (!ok_) return;
     pmu.shutdown();

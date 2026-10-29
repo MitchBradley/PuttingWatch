@@ -37,6 +37,7 @@
 #include "Clicker.h"
 #include "Battery.h"
 #include "ui.h"
+#include "update_ui.h"
 
 // Generated at build time by tools/fw_version.py (git describe); other envs
 // that don't run that script just report "dev".
@@ -71,6 +72,22 @@ static void confirmFirmware(bool healthy) {
         USBSerial.flush();
         esp_ota_mark_app_invalid_rollback_and_reboot();
     }
+}
+
+// "Update" on the main screen reboots into update mode (see update_ui.h). The
+// request is a magic word in RTC memory, which survives the software reset but
+// not a power cycle, and is cleared the moment it is read - so a flat battery
+// or a crash in update mode can never leave the watch stuck there.
+static RTC_NOINIT_ATTR uint32_t updateModeRequest;
+static constexpr uint32_t kUpdateModeMagic = 0x55504454;  // "UPDT"
+static bool updateMode = false;
+
+static void requestUpdateMode() {
+    updateModeRequest = kUpdateModeMagic;
+    USBSerial.println("update: restarting into update mode");
+    USBSerial.flush();
+    delay(50);
+    esp_restart();
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +464,7 @@ static void wireUiHooks() {
             lastBgTapMs = now;
         }
     };
+    ui::onUpdate = [] { requestUpdateMode(); };
     ui::onRecal = [] {
         xSemaphoreTake(trackerMux, portMAX_DELAY);
         tracker.recal();
@@ -488,6 +506,10 @@ void setup() {
                      esp_ota_get_running_partition()->label, (int)esp_reset_reason(),
                      (int)esp_sleep_get_wakeup_cause());
 
+    updateMode = updateModeRequest == kUpdateModeMagic && esp_reset_reason() == ESP_RST_SW;
+    updateModeRequest = 0;  // one-shot
+    if (updateMode) USBSerial.println("UPDATE MODE");
+
     // Release any pad holds left latched by a prior deep sleep (see
     // enterDeepSleep) before anything reconfigures those pins.
     gpio_hold_dis((gpio_num_t)PA_CTRL);
@@ -515,8 +537,11 @@ void setup() {
     touch->IIC_Interrupt_Flag = false;
     touchIgnoreUntilMs = millis() + 400;
 
-    bool imuOk = imu.begin(Wire, IMU_I2C_ADDR);
-    if (!imuOk) USBSerial.println("QMI8658 begin failed - check wiring/address");
+    bool imuOk = false;
+    if (!updateMode) {  // update mode has no swing tracking to feed
+        imuOk = imu.begin(Wire, IMU_I2C_ADDR);
+        if (!imuOk) USBSerial.println("QMI8658 begin failed - check wiring/address");
+    }
     if (!battery.begin(Wire)) USBSerial.println("AXP2101 begin failed - no battery gauge");
 
     // --- LVGL ---
@@ -536,6 +561,15 @@ void setup() {
     lv_indev_t* indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, touchRead);
+
+    if (updateMode) {
+        // Display, touch, LVGL and the PMU are up; everything else (IMU, audio,
+        // swing tracker, sampling task) stays off. The firmware was already
+        // confirmed valid on the normal boot that requested this.
+        updateui::begin(FW_VERSION, battery);
+        USBSerial.println("setup done (update mode)");
+        return;
+    }
 
     ui::init();
     wireUiHooks();
@@ -665,6 +699,11 @@ static void blankedLoop() {
 }
 
 void loop() {
+    if (updateMode) {
+        updateui::loop();  // BOOT = cancel here, so not the shutdown handler below
+        return;
+    }
+
 #if CONFIG_IDF_TARGET_ESP32C6
     checkBootShutdownButton();
 #endif

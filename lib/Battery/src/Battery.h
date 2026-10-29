@@ -29,6 +29,10 @@ class Battery {
     // then looks like a normal cold boot. Call only when ok().
     void shutdown();
 
+    // True while VBUS (USB / a charger) is present. A firmware update is
+    // allowed on a low battery only when this is true.
+    bool externalPower();
+
     bool ok() const { return ok_; }
 
   private:

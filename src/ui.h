@@ -36,5 +36,6 @@ extern std::function<void()> onTap;                    // screen tapped (start c
 extern std::function<void()> onRecal;
 extern std::function<void()> onStop;
 extern std::function<void(int)> onAdjustClickThreshold;  // -1 / +1 from the bottom buttons
+extern std::function<void()> onUpdate;                 // "Update" button on the waiting screen
 
 }  // namespace ui

@@ -13,6 +13,7 @@ std::function<void()> onTap;
 std::function<void()> onRecal;
 std::function<void()> onStop;
 std::function<void(int)> onAdjustClickThreshold;
+std::function<void()> onUpdate;
 
 namespace {
 
@@ -29,6 +30,7 @@ lv_obj_t* battBar = nullptr;
 lv_obj_t* battLabel = nullptr;
 lv_obj_t* minusBtn = nullptr;
 lv_obj_t* plusBtn = nullptr;
+lv_obj_t* updateBtn = nullptr;      // waiting screen only: reboot into firmware-update mode
 lv_obj_t* byeLabel = nullptr;
 
 // Background colours, matching ContentView.swift's palette intent.
@@ -59,6 +61,9 @@ void minusClicked(lv_event_t*) {
 }
 void plusClicked(lv_event_t*) {
     if (onAdjustClickThreshold) onAdjustClickThreshold(+1);
+}
+void updateClicked(lv_event_t*) {
+    if (onUpdate) onUpdate();
 }
 
 void setHidden(lv_obj_t* o, bool hidden) {
@@ -149,6 +154,15 @@ void init() {
     lv_obj_add_flag(minusBtn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(plusBtn, LV_OBJ_FLAG_HIDDEN);
 
+    // "Update": bottom-right corner of the waiting screen, over the empty
+    // corner of the Honu image. A small, quiet button - it's used rarely, and
+    // a tap anywhere else here starts calibration. Hidden until the first
+    // render picks the screen, like the buttons above.
+    updateBtn = makeButton("Update", updateClicked, LV_ALIGN_BOTTOM_RIGHT, -22, -30, 128, 58,
+                           &lv_font_montserrat_24);
+    lv_obj_set_style_bg_color(updateBtn, lv_color_hex(0x3A3A3A), 0);
+    lv_obj_add_flag(updateBtn, LV_OBJ_FLAG_HIDDEN);
+
     // Every dynamic label gets a FIXED box (full width, fixed height, fixed
     // position) with the text centred inside it - see the note in render():
     // an auto-sized label re-invalidates a moving region and tears.
@@ -201,6 +215,7 @@ void showByeScreen() {
     setHidden(battLabel, true);
     setHidden(minusBtn, true);
     setHidden(plusBtn, true);
+    setHidden(updateBtn, true);
     setHidden(byeLabel, false);
     lv_obj_move_foreground(byeLabel);
     lv_refr_now(nullptr);  // force the flush now - normal render() cadence
@@ -282,6 +297,7 @@ void render(const Snapshot& s) {
     // up (kBattYWaiting) to clear the Honu image just beneath it.
     bool showBatt = showTopBtns || s.state == State::WaitingForCalibration;
     bool battOnWaitScreen = s.state == State::WaitingForCalibration;
+    bool showUpdate = showWait && !showBottom;  // the waiting screen only, not "Hold still"
 
     if (strcmp(status, lastStatus)) {
         strcpy(lastStatus, status);
@@ -329,7 +345,7 @@ void render(const Snapshot& s) {
 
     int vis = (showBig ? 1 : 0) | (showThresh ? 2 : 0) | (showTopBtns ? 4 : 0) |
               (showNudge ? 8 : 0) | (showWait ? 16 : 0) | (showBottom ? 32 : 0) |
-              (showBatt ? 64 : 0);
+              (showBatt ? 64 : 0) | (showUpdate ? 128 : 0);
     if (vis != lastVis) {
         lastVis = vis;
         setHidden(honuImg, !showWait || showBottom);
@@ -344,6 +360,7 @@ void render(const Snapshot& s) {
         setHidden(battLabel, !showBatt);
         setHidden(minusBtn, !showNudge);
         setHidden(plusBtn, !showNudge);
+        setHidden(updateBtn, !showUpdate);
     }
 }
 
