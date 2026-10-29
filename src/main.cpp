@@ -220,6 +220,21 @@ static void dispFlush(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map
     lv_display_flush_ready(disp);
 }
 
+// CO5300 (the SH8601 family of QSPI AMOLED controllers) wants every partial
+// update window to start on an even pixel and end on an odd one, in both
+// axes; an odd-aligned window leaves a stray column of wrong pixels - seen as
+// a thin vertical stripe on the auto-centred update screens, whose widgets
+// land on odd x. Widen each invalidated area to that grid BEFORE LVGL renders
+// it (rounding in dispFlush would be too late: the buffer already holds
+// exactly the unrounded area). The panel is 410x502, so x2/y2 stay in range.
+static void roundInvalidArea(lv_event_t* e) {
+    lv_area_t* a = static_cast<lv_area_t*>(lv_event_get_param(e));
+    a->x1 &= ~1;
+    a->y1 &= ~1;
+    a->x2 |= 1;
+    a->y2 |= 1;
+}
+
 static void touchRead(lv_indev_t*, lv_indev_data_t* data) {
     // Called every lv_timer_handler pass - do zero I2C traffic unless the
     // touch IRQ actually fired.
@@ -557,6 +572,7 @@ void setup() {
     lv_display_t* disp = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
     lv_display_set_flush_cb(disp, dispFlush);
     lv_display_set_buffers(disp, drawBuf, nullptr, bufBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_add_event_cb(disp, roundInvalidArea, LV_EVENT_INVALIDATE_AREA, nullptr);
 
     lv_indev_t* indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);

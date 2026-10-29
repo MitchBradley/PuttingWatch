@@ -35,7 +35,7 @@ Phase gShownPhase = Phase::Starting;  // what the visible buttons were built for
 
 // Widgets, in on-screen order (the flex column lays out whatever isn't hidden).
 lv_obj_t* titleLbl;
-lv_obj_t* spinner;
+lv_obj_t* busyLbl;   // "busy" dots - deliberately not an animated spinner, see buildScreen()
 lv_obj_t* qrBox;
 lv_obj_t* qr;
 lv_obj_t* bar;
@@ -113,9 +113,14 @@ void buildScreen() {
 
     titleLbl = makeLabel(col, &lv_font_montserrat_32, kTextMain, kContentW);
 
-    spinner = lv_spinner_create(col);
-    lv_spinner_set_anim_params(spinner, 1000, 200);
-    lv_obj_set_size(spinner, 84, 84);
+    // "Working..." indicator. NOT lv_spinner: this panel's tearing-effect sync
+    // is off (CO5300_WC_TEARON is commented out in the init sequence), so
+    // frames are pushed unsynchronised and any continuously moving graphic
+    // tears badly. A fixed-size label that changes a couple of times a second
+    // is the same kind of update the rest of the UI does cleanly.
+    busyLbl = makeLabel(col, &lv_font_montserrat_32, kTextMain, 64);
+    lv_obj_set_height(busyLbl, 40);
+    lv_obj_set_style_text_align(busyLbl, LV_TEXT_ALIGN_LEFT, 0);
 
     // White box around the QR code: scanners need the quiet zone, and the
     // screen is otherwise black.
@@ -183,7 +188,7 @@ void setShown(lv_obj_t* o, int& last, bool show) {
 struct View {
     std::string title, body, note, primary, secondary, link, qrData;
     bool titleSmall = false;
-    bool spinner = false, qr = false, bar = false, pct = false;
+    bool busy = false, qr = false, bar = false, pct = false;
     bool primaryEnabled = true, warn = false;
     int progress = 0;
 };
@@ -199,12 +204,12 @@ View viewFor(const wifiota::Status& st, bool batteryOk) {
     switch (st.phase) {
         case Phase::Starting:
             v.title = "Starting...";
-            v.spinner = true;
+            v.busy = true;
             v.secondary = "Cancel";
             break;
         case Phase::Scanning:
             v.title = "Looking for\nWi-Fi networks";
-            v.spinner = true;
+            v.busy = true;
             v.secondary = "Cancel";
             break;
         case Phase::Provisioning:
@@ -229,12 +234,12 @@ View viewFor(const wifiota::Status& st, bool batteryOk) {
         case Phase::Connecting:
             v.title = "Joining Wi-Fi";
             v.body = st.ssid;
-            v.spinner = true;
+            v.busy = true;
             v.secondary = "Cancel";
             break;
         case Phase::Checking:
             v.title = "Checking for\nupdates";
-            v.spinner = true;
+            v.busy = true;
             v.secondary = "Cancel";
             break;
         case Phase::UpToDate:
@@ -290,8 +295,8 @@ View viewFor(const wifiota::Status& st, bool batteryOk) {
 }
 
 void render(const wifiota::Status& st, bool batteryOk) {
-    static Cached cTitle, cBody, cNote, cPrimary, cSecondary, cLink, cPct, cQr;
-    static int sSpinner = -1, sQr = -1, sBar = -1, sPct = -1, sBody = -1, sNote = -1;
+    static Cached cTitle, cBody, cNote, cPrimary, cSecondary, cLink, cPct, cQr, cBusy;
+    static int sBusy = -1, sQr = -1, sBar = -1, sPct = -1, sBody = -1, sNote = -1;
     static int sPrimary = -1, sSecondary = -1, sLink = -1;
     static int lastTitleSmall = -1, lastWarn = -1, lastPrimaryEnabled = -1, lastProgress = -1;
 
@@ -332,7 +337,11 @@ void render(const wifiota::Status& st, bool batteryOk) {
         lv_qrcode_update(qr, v.qrData.c_str(), v.qrData.size());
     }
 
-    setShown(spinner, sSpinner, v.spinner);
+    if (v.busy) {
+        static const char* const kDots[] = {".", "..", "..."};
+        setText(busyLbl, cBusy, kDots[(millis() / 450) % 3]);
+    }
+    setShown(busyLbl, sBusy, v.busy);
     setShown(qrBox, sQr, v.qr);
     setShown(bar, sBar, v.bar);
     setShown(pctLbl, sPct, v.pct);
