@@ -1,18 +1,71 @@
-# PuttingWatch
+# Honu Watch Putting Stroke Trainer
 
 Golf putting-stroke trainer for the **Waveshare ESP32-S3-Touch-AMOLED-2.06**
-watch devkit. A C++/PlatformIO port of the `PuttingCoachWatch` watchOS app
-(itself the wrist-worn subset of the `PuttingCoach` iOS project).
+watch devkit.
 
-The device is mounted on the putter. You tap to calibrate a rest orientation,
-then it gives an audible **click** (a short tone through the onboard speaker)
-each time the backswing passes a new angular threshold. Clicking stops on the
-reversal into the forward stroke and re-arms once the putter settles back
-near address.
+## Putting Theory
 
-This first port covers the *watch subset only*: calibration + backswing/click
-detection. Impact detection and face-angle-at-impact (from the phone app) are
-future work — see `~/.claude/plans/shimmying-finding-whale.md`.
+Novice golfers think about hitting a putt harder or softer, but great
+putters always stroke the ball with the same amount of effort, controlling
+distance by the length of the backswing.  The tempo and "hit" is always
+the same; only the length of the stroke changes.  This is the "pendulum"
+motion - a pendulum of a given length always takes the same time to swing,
+regardless of the maximum distance from the rest position.  A pendulum
+stroke is good for both distance control and directional accuracy, because
+an inconsistent "hit" action usually varies the face angle at impact.
+
+The Honu Watch measures the backswing of your putting stroke, giving you
+audio feedback to teach a well-controlled motion that varies only in the
+length of the stroke.  Using it will lock in your distance control and
+stabilize your direction, so you won't pull putts by trying to hit
+them harder, and vice versa.
+
+## Usage
+
+You can wear the watch on either wrist, facing either up or down.  It
+can be convenient to wear it opposite from your regular watch (so you
+don't have to remove you other watch), and on the inside of your wrist
+so you can see it in the address position, but the watch doesn't care
+either way.  When you turn it on, you tap it to calibrate at rest
+orientation - it looks for a few seconds of stillness and figures out
+where your wrist angle relative to the ground at address.  After a
+couple of seconds of stillness in the rest position, it says "Ready"
+to tell you that you can begin your stroke.  It then senses the
+orientation change during the putting stroke, giving an audible
+**click** (a short tone through the onboard speaker) each time the
+backswing passes a new angular threshold. Clicking stops on the
+reversal into the forward stroke and re-arms (saying "Ready") once the
+putter settles back near address.
+
+The screen goes blank after a few seconds to save power, but the watch
+is still working and sensing the position.  If you tap the screen it
+will light up again so you can use the on-screen controls to change
+the click threshold and whatnot.  The click threshold numbers
+correspond roughly to "paces away from the hole", but that is only
+approximate due to variation in green speed and golfers.  Regardless,
+a threshold of 1 is a very short putt, while 12 is quite a long one.
+
+The objective is to set the threshold according to the length of the
+putt you are practicising, then make a well-controller backswing such
+that the watch clicks exactly once before the forward stroke.  If the
+watch clicks twice (or even more times), it means that your stroke was
+twice as long as necessary.  This is very common with a jerky putting
+stroke, because the putter is moving so fast that you cannot stop it
+between the first and second clicks.  Unless you already have an
+excellent putting stroke, you will probably find it difficult at first
+to make it click just once.
+
+To smooth out your stroke, practice a very slow backswing until you hear
+a click, then begin the forward stroke gently.  Initially this will be
+easier at large threshold values.  As your control improves, you can
+move to smaller thresholds and shorter distances.l
+
+After some practice, your putting stroke will be silky smooth and you
+will feel the backswing length for different length putts.  You will
+know just what a one-click stroke at a given setting feels like, and
+you can imagine exactly when the click will happen.  You will then
+control distance solely by backwing length, without thinking that you
+need need to hit putts harder or softer.
 
 ## Layout
 
