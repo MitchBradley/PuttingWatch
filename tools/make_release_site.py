@@ -19,6 +19,8 @@ Release assets):
     firmware/<ver>/firmware.bin          app image, flashed over the air
     firmware/<ver>/firmware.factory.bin  bootloader + partitions + app, flashed
                                          over USB at offset 0
+    guide/, screens/           the user guide (docs/guide) and the screenshots it
+                               shows (docs/screens), copied as they are
 
 manifest.json is a contract with firmware already in the field - only ever add
 optional fields to it, never rename or repurpose one. "schema" is there so a
@@ -114,6 +116,15 @@ def main():
         page = page.replace(key, val)
     with open(os.path.join(a.out, "index.html"), "w") as f:
         f.write(page)
+
+    # The user guide and its screenshots are published alongside, at the same
+    # relative positions they have in the repo, so the guide's ../screens/ image
+    # paths work unchanged both when browsing the repo and on the site.
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for name in ("guide", "screens"):
+        src = os.path.join(repo, "docs", name)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(a.out, name))
 
     print(f"site for {a.version} written to {a.out}")
 
