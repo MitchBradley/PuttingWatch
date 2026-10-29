@@ -31,7 +31,7 @@ lv_obj_t* battLabel = nullptr;
 lv_obj_t* minusBtn = nullptr;
 lv_obj_t* plusBtn = nullptr;
 lv_obj_t* updateBtn = nullptr;      // Bye screen only: reboot into firmware-update mode
-lv_obj_t* versionLabel = nullptr;   // waiting screen only: firmware version, bottom-right
+lv_obj_t* versionLabel = nullptr;   // waiting screen only: firmware version, along the bottom
 lv_obj_t* byeLabel = nullptr;
 
 // Background colours, matching ContentView.swift's palette intent.
@@ -164,9 +164,13 @@ void init(const char* firmwareVersion) {
     lv_obj_set_style_bg_color(updateBtn, lv_color_hex(0x3A3A3A), 0);
     lv_obj_add_flag(updateBtn, LV_OBJ_FLAG_HIDDEN);
 
-    // Firmware version, bottom-right of the waiting screen over the empty
-    // corner of the Honu image. Static text, set once. Starts hidden so it
-    // can't flash on other screens before the first render picks one.
+    // Firmware version along the bottom of the waiting screen, over the empty
+    // lower-right of the Honu image, starting at 65% of the screen width. Static
+    // text, set once. Starts hidden so it can't flash on other screens before
+    // the first render picks one. The panel has large rounded corners, so keep
+    // it well off them: a label hugging the corner (30, 22 from the right
+    // edge) was clipped. A long development version string
+    // ("4bd9850-dirty") runs further right than a release's "v0.1.1".
     versionLabel = lv_label_create(root);
     lv_obj_set_style_text_font(versionLabel, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(versionLabel, lv_color_hex(0x707070), 0);
@@ -175,7 +179,7 @@ void init(const char* firmwareVersion) {
     snprintf(ver, sizeof(ver), "%s%s", (firmwareVersion && firmwareVersion[0] >= '0' && firmwareVersion[0] <= '9') ? "v" : "",
              firmwareVersion ? firmwareVersion : "");
     lv_label_set_text(versionLabel, ver);
-    lv_obj_align(versionLabel, LV_ALIGN_BOTTOM_RIGHT, -30, -22);
+    lv_obj_align(versionLabel, LV_ALIGN_BOTTOM_LEFT, LCD_WIDTH * 70 / 100, -36);
     lv_obj_add_flag(versionLabel, LV_OBJ_FLAG_HIDDEN);
 
     // Every dynamic label gets a FIXED box (full width, fixed height, fixed
