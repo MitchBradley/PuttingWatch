@@ -152,9 +152,17 @@ void buildScreen() {
     primaryBtn = makeButton(col, kBtnGreen, 64, onPrimary, &primaryLbl);
     secondaryBtn = makeButton(col, kBtnGrey, 56, onSecondary, &secondaryLbl);
 
+    // "Change Wi-Fi" sits directly under the main buttons, so it is easy to hit
+    // by accident. Three things keep it out of the way: it is only as wide as
+    // its words (a label defaults to the full row, which made the whole strip
+    // under a button tappable), its invisible touch margin is small, and it has
+    // a real gap above it - more than the buttons' and the link's touch margins
+    // added together (8 + 6), so their touch areas can never overlap.
     linkLbl = makeLabel(col, &lv_font_montserrat_20, kLink, kContentW);
+    lv_obj_set_width(linkLbl, LV_SIZE_CONTENT);
+    lv_obj_set_style_margin_top(linkLbl, 28, 0);
     lv_obj_add_flag(linkLbl, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(linkLbl, 12);
+    lv_obj_set_ext_click_area(linkLbl, 6);
     lv_obj_add_event_cb(linkLbl, onLink, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_style_text_decor(linkLbl, LV_TEXT_DECOR_UNDERLINE, 0);
 }

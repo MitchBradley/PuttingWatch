@@ -136,6 +136,23 @@ static void putingAppScreens() {
     // trip to power-off), so nothing can be captured after it.
     ui::showByeScreen();
     capture("app-5-bye");
+
+    // The Update button's two feedback states: held down, then clicked (which
+    // relabels it just before the restart). The Bye screen is a one-way trip,
+    // so these come last. Its only visible button is Update.
+    lv_obj_t* active = lv_screen_active();
+    lv_obj_t* update = nullptr;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(active); i++) {
+        lv_obj_t* c = lv_obj_get_child(active, i);
+        if (lv_obj_check_type(c, &lv_button_class) && !lv_obj_has_flag(c, LV_OBJ_FLAG_HIDDEN)) update = c;
+    }
+    if (update) {
+        lv_obj_add_state(update, LV_STATE_PRESSED);
+        capture("app-6-bye-update-touched");
+        lv_obj_remove_state(update, LV_STATE_PRESSED);
+        lv_obj_send_event(update, LV_EVENT_CLICKED, nullptr);  // ui::onUpdate is unset here: no restart
+        capture("app-7-bye-update-starting");
+    }
 }
 
 // ---- update mode's screens ---------------------------------------------------

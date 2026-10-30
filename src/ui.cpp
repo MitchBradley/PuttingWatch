@@ -64,6 +64,14 @@ void plusClicked(lv_event_t*) {
     if (onAdjustClickThreshold) onAdjustClickThreshold(+1);
 }
 void updateClicked(lv_event_t*) {
+    // Restarting into update mode takes a moment, long enough that the user
+    // can't tell whether the touch registered. Say so, on screen, first: turn
+    // the button green (it already is while held - see init()), relabel it,
+    // and force that frame out NOW, because the restart below starts before
+    // the normal ~20 Hz render would draw it.
+    lv_obj_set_style_bg_color(updateBtn, lv_color_hex(0x1B7F3B), 0);
+    lv_label_set_text(lv_obj_get_child(updateBtn, 0), "Starting...");
+    lv_refr_now(nullptr);
     if (onUpdate) onUpdate();
 }
 
@@ -162,6 +170,9 @@ void init(const char* firmwareVersion) {
     updateBtn = makeButton("Update", updateClicked, LV_ALIGN_CENTER, 0, 110, 240, 76,
                            &lv_font_montserrat_32);
     lv_obj_set_style_bg_color(updateBtn, lv_color_hex(0x3A3A3A), 0);
+    // Green while touched - the same colour as the other "go" buttons. The
+    // default theme's pressed shade of dark grey is too faint to see.
+    lv_obj_set_style_bg_color(updateBtn, lv_color_hex(0x1B7F3B), LV_STATE_PRESSED);
     lv_obj_add_flag(updateBtn, LV_OBJ_FLAG_HIDDEN);
 
     // Firmware version along the bottom of the waiting screen, over the empty
