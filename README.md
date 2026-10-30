@@ -180,10 +180,10 @@ nothing in the source to bump.
 
 **One-time GitHub setup** (the workflow can't do these):
 
-1. Settings → Pages → Source: **GitHub Actions**.
-2. Settings → Environments → `github-pages` → Deployment branches and tags →
-   add a tag rule `v*`. By default only the default branch may deploy to that
-   environment, which rejects a tag-triggered deploy.
+1. Settings → Pages → Source: **Deploy from a branch**, branch `gh-pages`,
+   folder `/ (root)`. The website is that branch; the workflows commit to it.
+   (It was created once by seeding it with a release's site; if it is ever
+   deleted, recreate it the same way before the next release.)
 
 **To release:**
 
@@ -200,26 +200,22 @@ firmware's own version string equals the tag, then publishes:
 |---|---|---|
 | `firmware-<ver>.factory.bin` | GitHub Release asset | full image (bootloader + partitions + app), USB install |
 | `firmware-<ver>.bin` | GitHub Release asset | app image only; permanent archive of every release |
-| `https://<owner>.github.io/PuttingWatch/` | GitHub Pages | USB install page (ESP Web Tools: Chrome/Edge + cable) |
-| `.../manifest.json` | GitHub Pages | what the watch reads to find the newest update |
-| `.../firmware/<ver>/firmware.bin` | GitHub Pages | the image the watch downloads |
+| `https://<owner>.github.io/PuttingWatch/` | GitHub Pages (`gh-pages`) | USB install page (ESP Web Tools: Chrome/Edge + cable) |
+| `.../manifest.json` | GitHub Pages (`gh-pages`) | what the watch reads to find the newest update |
+| `.../firmware/<ver>/firmware.bin` | GitHub Pages (`gh-pages`) | the image the watch downloads |
 
-Pages only ever holds the newest release. "Run workflow" on the Actions tab
-builds and tests without publishing - a quick way to check CI is healthy.
+The site only ever holds the newest release (the Release assets keep every
+version). "Run workflow" on the Actions tab builds and tests without
+publishing - a quick way to check CI is healthy.
 
-**Publishing only the docs.** Changes under `docs/` (and the installer page
-template) go live by themselves when they reach `main`, with no firmware
-release, via `.github/workflows/docs.yml`; it can also be run by hand from the
-Actions tab. Pages replaces the whole site on every deploy and the firmware and
-OTA manifest live in it, so that workflow rebuilds the site from the release
-that is currently live and refuses to deploy if the regenerated manifest
-differs in any way from the live one. Two things to know:
-
-- It deploys from `main`, so the `github-pages` environment must allow that
-  branch as well as `v*` tags (Settings → Environments → github-pages →
-  Deployment branches and tags).
-- The guide comes from `main` but the firmware is the latest release, so avoid
-  merging guide text that describes firmware you haven't released yet.
+**Publishing only the docs.** Changes under `docs/` go live by themselves when
+they reach `main`, with no firmware release, via `.github/workflows/docs.yml`;
+it can also be run by hand from the Actions tab. It replaces only `guide/` and
+`screens/` on `gh-pages`, so it cannot affect the firmware or the OTA manifest.
+The guide comes from `main` but the firmware is the latest release, so avoid
+merging guide text that describes firmware you haven't released yet. (Changes
+to the installer page template, `release/index.template.html`, take effect at
+the next release.)
 
 `manifest.json` carries `version`, `url`, `size`, `sha256`, `min_version`,
 `released` and `notes`. Watches in the field depend on it, so **only ever add

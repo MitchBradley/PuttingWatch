@@ -2,8 +2,9 @@ name: Release
 
 # Push a tag like v0.1.0 (or v0.2.0-beta.1) to build, test and publish:
 #   - a GitHub Release with the firmware images attached (permanent archive)
-#   - the GitHub Pages site: USB install page + manifest.json for over-the-air
-#     updates (holds only the newest release)
+#   - the website, on the gh-pages branch (served by GitHub Pages): USB install
+#     page + manifest.json for over-the-air updates (holds only the newest
+#     release) + the user guide
 # "Run workflow" from the Actions tab does the build and tests only - handy for
 # checking CI works before tagging; nothing is published.
 
@@ -16,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release
+  group: pages
   cancel-in-progress: false
 
 jobs:
@@ -82,12 +83,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # create the GitHub Release
-      pages: write      # deploy the site
-      id-token: write   # required by deploy-pages
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      contents: write   # create the GitHub Release, push gh-pages
     env:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
@@ -118,7 +114,7 @@ jobs:
             --out site
           cat site/manifest.json
 
-      # Release before Pages: Pages is what makes the update visible to
+      # Release before the site: the site is what makes the update visible to
       # watches, so it goes last - a failure above never reaches a device.
       - name: Create GitHub release
         env:
@@ -132,9 +128,25 @@ jobs:
             --title "Honu Watch ${VERSION}" --generate-notes \
             "firmware-${VERSION}.bin" "firmware-${VERSION}.factory.bin"
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/checkout@v4
         with:
-          path: site
+          ref: gh-pages
+          path: pages
 
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      # The branch holds exactly the newest release's site, so older firmware
+      # folders disappear (the Release assets keep every version).
+      - name: Publish the site
+        run: |
+          rsync -a --delete --exclude=.git --exclude=.nojekyll site/ pages/
+          touch pages/.nojekyll
+          cd pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Release ${VERSION}"
+          for i in 1 2 3; do
+            git push && exit 0
+            git pull --rebase
+          done
+          echo "::error::could not push gh-pages"
+          exit 1

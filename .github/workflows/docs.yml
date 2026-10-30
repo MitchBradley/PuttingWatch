@@ -1,15 +1,11 @@
 name: Docs
 
-# Republish the website - user guide, screenshots, installer page - WITHOUT a
-# firmware release. Runs when the docs change on main, or by hand ("Run
-# workflow").
+# Publish the user guide and its screenshots WITHOUT a firmware release. Runs
+# when docs/ changes on main, or by hand ("Run workflow").
 #
-# Why this isn't just "deploy docs/": GitHub Pages replaces the WHOLE site on
-# every deploy, and the firmware, the over-the-air manifest and the USB
-# installer live in that same site. Deploying only the docs would delete them
-# and break updating for every watch. So this rebuilds the site from the release
-# that is currently live (the same inputs release.yml used) and adds the
-# current docs on top.
+# The website is the gh-pages branch (served by GitHub Pages). This replaces
+# only guide/ and screens/ there; the firmware, the over-the-air manifest and
+# the installer page are written by release.yml and never touched here.
 #
 # Caveat: the guide comes from main but the firmware is the latest release, so
 # avoid merging guide text that describes firmware you haven't released yet.
@@ -19,85 +15,44 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
-      - 'release/index.template.html'
-      - 'tools/make_release_site.py'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
-# The same group as release.yml: Pages deploys must never overlap, or a docs run
-# that started before a release finished could put the old firmware back.
+# Shared with release.yml so the two never push gh-pages at the same moment.
 concurrency:
-  group: release
+  group: pages
   cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read the manifest that is live now
-        run: |
-          owner="${GITHUB_REPOSITORY_OWNER,,}"
-          repo="${GITHUB_REPOSITORY#*/}"
-          if ! curl -fsSL "https://${owner}.github.io/${repo}/manifest.json" -o live-manifest.json; then
-            echo "::error::No release is published yet (the site has no manifest.json). Tag a release first."
-            exit 1
-          fi
-          echo "live release: $(jq -r .version live-manifest.json)"
-
-      - name: Download that release's firmware
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version="$(jq -r .version live-manifest.json)"
-          mkdir dist
-          gh release download "v${version}" --dir dist \
-            --pattern "firmware-${version}.bin" --pattern "firmware-${version}.factory.bin"
-          ls -l dist
-
-      - name: Assemble the site from the live release plus the current docs
-        run: |
-          version="$(jq -r .version live-manifest.json)"
-          owner="${GITHUB_REPOSITORY_OWNER,,}"
-          repo="${GITHUB_REPOSITORY#*/}"
-          python3 tools/make_release_site.py \
-            --version "$version" \
-            --min-version "$(jq -r .min_version live-manifest.json)" \
-            --released "$(jq -r .released live-manifest.json)" \
-            --notes "$(jq -r .notes live-manifest.json)" \
-            --base-url "https://${owner}.github.io/${repo}/" \
-            --repo-url "https://github.com/${GITHUB_REPOSITORY}" \
-            --firmware "dist/firmware-${version}.bin" \
-            --factory "dist/firmware-${version}.factory.bin" \
-            --template release/index.template.html \
-            --out site
-
-      # What watches see must not change because of a docs edit. The manifest is
-      # regenerated from the release's own files; if it differs AT ALL from the
-      # live one (version, size, SHA-256, URL...), something is wrong - stop
-      # before deploying rather than ship firmware that doesn't match.
-      - name: Check the over-the-air manifest is unchanged
-        run: |
-          if ! diff <(jq -S . live-manifest.json) <(jq -S . site/manifest.json); then
-            echo "::error::The regenerated manifest differs from the live one - not deploying."
-            exit 1
-          fi
-          echo "manifest identical to the live one"
-
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/checkout@v4
         with:
-          path: site
+          ref: gh-pages
+          path: pages
 
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      - name: Publish the guide
+        run: |
+          rsync -a --delete docs/guide/ pages/guide/
+          rsync -a --delete docs/screens/ pages/screens/
+          cd pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "guide already up to date"
+            exit 0
+          fi
+          git commit -m "Docs from ${GITHUB_SHA::7}"
+          for i in 1 2 3; do
+            git push && exit 0
+            git pull --rebase
+          done
+          echo "::error::could not push gh-pages"
+          exit 1
