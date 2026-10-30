@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "version": "0.1.5",
+  "min_version": "0.0.0",
+  "released": "2026-10-30T17:01:25Z",
+  "url": "https://mitchbradley.github.io/PuttingWatch/firmware/0.1.5/firmware.bin",
+  "size": 3132224,
+  "sha256": "ec34b7b7d6d7cdccdd8c64d4b2f411ecb4f0edef8e608ff8d72a58e6b01a291e",
+  "notes": "Add Help and Honu QR pages to the Bye screen"
+}

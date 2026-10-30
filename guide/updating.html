@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Updating your Honu Watch</title>
+<meta name="description" content="How to update your Honu Watch over Wi-Fi, step by step, with pictures of every screen.">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<div class="page">
+
+<header>
+  <p class="crumb">Honu Watch guide</p>
+  <h1>Updating your watch</h1>
+  <nav class="guide-nav" aria-label="Guide pages">
+    <a href="using.html">How to use it</a>
+    <a href="updating.html" aria-current="page">Updating the watch</a>
+  </nav>
+  <p class="lede">Your watch updates itself over Wi-Fi &mdash; no cable and no computer. It takes a few minutes. The first time also includes a one-time Wi-Fi setup, using your phone.</p>
+</header>
+
+<nav class="toc" aria-label="On this page">
+  <p>On this page</p>
+  <ul>
+    <li><a href="#before">Before you start</a></li>
+    <li><a href="#step-1">Step 1 &mdash; Open update mode</a></li>
+    <li><a href="#step-2">Step 2 &mdash; Connect to your Wi-Fi (first time only)</a></li>
+    <li><a href="#step-3">Step 3 &mdash; Wait while it checks</a></li>
+    <li><a href="#step-4">Step 4 &mdash; Install the update</a></li>
+    <li><a href="#step-5">Step 5 &mdash; Let it finish</a></li>
+    <li><a href="#trouble">If something goes wrong</a></li>
+  </ul>
+</nav>
+
+<section id="before" class="box need">
+  <h2>Before you start</h2>
+  <ul>
+    <li><strong>Battery:</strong> at least 40%, or plug in a charger. The watch won't install an update on a low battery.</li>
+    <li><strong>Your home Wi-Fi</strong> &mdash; its name and password, and be within range of it. The watch can only use <strong>2.4&nbsp;GHz</strong> networks (almost all home networks offer one; if your router has a separate 5&nbsp;GHz name, choose the other).</li>
+    <li><strong>A smartphone</strong>, for the one-time Wi-Fi setup.</li>
+  </ul>
+  <p>Wi-Fi that asks you to sign in on a web page (hotels, cafes, airports) won't work.</p>
+</section>
+
+<section id="step-1" class="step">
+  <h2><span class="n">1</span> Open update mode</h2>
+  <p>The watch has two buttons on its side. The <kbd>upper button</kbd> (nearer the top of the screen) puts the watch to sleep; the <kbd>lower button</kbd> (nearer the bottom of the screen) wakes it up.</p>
+  <p>To begin, tap <span class="btn grey">Stop</span> at the top right of the main screen, or press the <kbd>upper button</kbd>. (The first screen, &ldquo;Tap when in putting position&rdquo;, has no Stop button &mdash; use the <kbd>upper button</kbd> there.)</p>
+  <p>The watch says <strong>Bye</strong>. For about <strong>three seconds</strong> an <span class="btn grey">Update</span> button appears below it &mdash; tap it.</p>
+  <p>When you tap it, the button turns green and says <strong>Starting&hellip;</strong>. The watch then restarts into update mode, which takes a few seconds.</p>
+  <div class="shots">
+    <figure><img class="screen" src="../screens/app-5-bye.png" width="410" height="502" alt="The Bye screen: the word Bye with an Update button below it" loading="lazy"><figcaption>The Bye screen</figcaption></figure>
+    <figure><img class="screen" src="../screens/app-7-bye-update-starting.png" width="410" height="502" alt="The same screen after tapping: the button is green and reads Starting" loading="lazy"><figcaption>After you tap Update</figcaption></figure>
+  </div>
+  <div class="box note">
+    <p><strong>Missed it?</strong> Nothing is wrong &mdash; the watch simply goes to sleep. Press the <kbd>lower button</kbd> to wake it and try once more.</p>
+  </div>
+</section>
+
+<section id="step-2" class="step">
+  <h2><span class="n">2</span> Connect to your Wi-Fi</h2>
+  <p class="once">First time only</p>
+  <p>The watch shows a square barcode (a QR code). It is a one-time key to a temporary Wi-Fi network that the watch creates, so your phone can pass your home Wi-Fi details to it.</p>
+  <ol>
+    <li><strong>Scan it with your phone's camera</strong> and tap <strong>Join</strong> (or <strong>Connect</strong>) when the phone offers. If the phone warns that this network has &ldquo;no internet&rdquo;, that is normal &mdash; choose to stay connected.</li>
+    <li>A <strong>setup page</strong> opens on your phone by itself. If it doesn't, the watch's screen changes to a second QR code: <strong>scan that one</strong> to open it.</li>
+    <li>On the page, pick <strong>your home Wi-Fi</strong> from the list, type its <strong>password</strong> (tick <em>Show password</em> to check it), and tap <strong>Connect</strong>.</li>
+    <li>The page says <strong>Check your watch</strong>. Look at the watch &mdash; your phone will go back to your normal Wi-Fi on its own.</li>
+  </ol>
+  <div class="shots">
+    <figure><img class="screen" src="../screens/update-02-setup-scan-to-join.png" width="410" height="502" alt="Set up Wi-Fi screen with a QR code and the text: Scan with your phone's camera, then tap Join" loading="lazy"><figcaption>First scan: join the watch's temporary network</figcaption></figure>
+    <figure><img class="screen" src="../screens/update-03-setup-scan-to-open-page.png" width="410" height="502" alt="Set up Wi-Fi screen with a second QR code and the text: If the page didn't open, scan this to open it" loading="lazy"><figcaption>Second scan, only if the page didn't open</figcaption></figure>
+  </div>
+  <p>The little text under the barcode gives the temporary network's name and password, in case you would rather join it by hand and then go to <strong>192.168.4.1</strong> in your phone's browser.</p>
+  <div class="box note">
+    <p><strong>Wrong password?</strong> The watch tells you, and shows a fresh barcode. Scan it again and re-enter the password &mdash; Wi-Fi passwords are case-sensitive.</p>
+    <div class="shots one">
+      <figure><img class="screen" src="../screens/update-04-setup-wrong-password.png" width="410" height="502" alt="Set up Wi-Fi screen reading: Couldn't join HomeWiFi. Wrong password? Scan to try again." loading="lazy"></figure>
+    </div>
+  </div>
+  <p>The setup gives up after 10 minutes if nothing happens. Choose <strong>Try again</strong> (or start over from step&nbsp;1).</p>
+</section>
+
+<section id="step-3" class="step">
+  <h2><span class="n">3</span> Wait while it checks</h2>
+  <p>The watch joins your Wi-Fi and asks the update page whether there is a newer version. This takes a few seconds; the dots move while it works.</p>
+  <div class="shots">
+    <figure><img class="screen" src="../screens/update-05-joining-wifi.png" width="410" height="502" alt="Screen reading Joining Wi-Fi, with the network name HomeWiFi" loading="lazy"><figcaption>Joining your Wi-Fi</figcaption></figure>
+    <figure><img class="screen" src="../screens/update-06-checking.png" width="410" height="502" alt="Screen reading Checking for updates" loading="lazy"><figcaption>Checking for updates</figcaption></figure>
+  </div>
+</section>
+
+<section id="step-4" class="step">
+  <h2><span class="n">4</span> Install the update</h2>
+  <p>If a newer version exists, the watch shows <strong>Update available</strong>, with the new version number and what you have now. Tap <span class="btn go">Install</span>.</p>
+  <p>If you're already current it says <strong>You're up to date</strong> &mdash; tap <span class="btn go">Done</span> and you're finished.</p>
+  <div class="shots">
+    <figure><img class="screen" src="../screens/update-08-update-available.png" width="410" height="502" alt="Update available screen: Version 0.2.0, you have 0.1.1, with Install and Not now buttons" loading="lazy"><figcaption>An update is ready</figcaption></figure>
+    <figure><img class="screen" src="../screens/update-07-up-to-date.png" width="410" height="502" alt="You're up to date screen with a Done button" loading="lazy"><figcaption>Nothing newer</figcaption></figure>
+  </div>
+  <div class="box warn">
+    <p><strong>Install is greyed out and the screen says the battery is low?</strong> Plug in a charger, or let the battery reach 40%, and it becomes available.</p>
+    <div class="shots one">
+      <figure><img class="screen" src="../screens/update-09-update-available-low-battery.png" width="410" height="502" alt="Update available screen with the Install button greyed out and a red message saying the battery is low" loading="lazy"></figure>
+    </div>
+  </div>
+  <p><span class="btn grey">Not now</span> takes you back to the putting app without installing anything.</p>
+</section>
+
+<section id="step-5" class="step">
+  <h2><span class="n">5</span> Let it finish</h2>
+  <p>A bar shows the download. It usually takes a minute or two. <strong>Keep the watch on</strong> until it restarts by itself &mdash; it does that as soon as the update is installed.</p>
+  <div class="shots">
+    <figure><img class="screen" src="../screens/update-10-downloading.png" width="410" height="502" alt="Downloading update screen with a progress bar at 42 percent" loading="lazy"><figcaption>Downloading</figcaption></figure>
+    <figure><img class="screen" src="../screens/update-11-installed.png" width="410" height="502" alt="Update installed screen reading Restarting" loading="lazy"><figcaption>Done &mdash; restarting</figcaption></figure>
+  </div>
+  <p>The watch comes back to the first screen. The <strong>version number</strong> is in the lower right &mdash; check that it's the new one.</p>
+  <div class="shots one">
+    <figure><img class="screen" src="../screens/app-1-tap-when-in-putting-position.png" width="410" height="502" alt="The first screen, Tap when in putting position, with the version number v0.1.1 at the lower right" loading="lazy"><figcaption>Your version, bottom right</figcaption></figure>
+  </div>
+  <div class="box note">
+    <h3>Next time</h3>
+    <p>The watch remembers your Wi-Fi, so step&nbsp;2 is skipped: tap <span class="btn grey">Update</span> and it joins by itself. Away from home, or if you change your router, it simply shows the setup barcode again. You can also pick another network at any time with <strong>Change Wi-Fi</strong>, shown on the result screens.</p>
+  </div>
+</section>
+
+<section id="trouble">
+  <h2>If something goes wrong</h2>
+  <div class="box note">
+    <p><strong>Nothing is ever lost.</strong> You can stop at any moment with <span class="btn grey">Cancel</span> (or the <kbd>upper button</kbd>) and the watch goes back to the putting app. Your current version is only replaced once the new one has been fully downloaded and checked, and if a new version doesn't start properly the watch automatically returns to the previous one.</p>
+  </div>
+
+  <details>
+    <summary>It says &ldquo;Something went wrong&rdquo;</summary>
+    <div class="shots one">
+      <figure><img class="screen" src="../screens/update-12-something-went-wrong.png" width="410" height="502" alt="Something went wrong screen with the message The update server returned error 404, and Try again and Cancel buttons" loading="lazy"></figure>
+    </div>
+    <p>The message under the heading says what happened. Tap <strong>Try again</strong> first &mdash; most problems are momentary. If it keeps happening:</p>
+    <ul>
+      <li><strong>&ldquo;Couldn't reach the update server&rdquo;</strong> or <strong>&ldquo;Couldn't get the time from the internet&rdquo;</strong> &mdash; the watch is on your Wi-Fi but the Wi-Fi has no internet, or it asks for a web sign-in. Check your router, or use <strong>Change Wi-Fi</strong> to try another network.</li>
+      <li><strong>&ldquo;The download stalled&rdquo;</strong> &mdash; the signal is weak. Move closer to the router.</li>
+      <li><strong>&ldquo;The battery is too low&rdquo;</strong> &mdash; plug in a charger.</li>
+      <li><strong>&ldquo;The update server returned error &hellip;&rdquo;</strong> &mdash; the update page isn't available right now. Try again later.</li>
+      <li><strong>&ldquo;The downloaded update was corrupted&rdquo;</strong> &mdash; nothing was installed. Try again.</li>
+    </ul>
+  </details>
+
+  <details>
+    <summary>The setup page didn't open on my phone</summary>
+    <p>Look at the watch: once your phone has joined the watch's network, the screen changes to a second barcode &mdash; scan it. Or open your phone's web browser and type <strong>192.168.4.1</strong>.</p>
+  </details>
+
+  <details>
+    <summary>My Wi-Fi isn't in the list</summary>
+    <p>The watch only sees 2.4&nbsp;GHz networks, so a 5&nbsp;GHz-only network won't appear &mdash; look for the same router's other name. Move closer to the router. If your network is hidden, choose <strong>Other / hidden network</strong> at the bottom of the list and type its exact name.</p>
+  </details>
+
+  <details>
+    <summary>The barcode won't scan</summary>
+    <p>Hold the phone steady about 15&ndash;25&nbsp;cm (6&ndash;10&nbsp;inches) from the watch and avoid glare on the screen. Or join by hand: in your phone's Wi-Fi settings choose the network named on the watch (it starts with <strong>HonuWatch-</strong>) and type the password shown under the barcode, then go to <strong>192.168.4.1</strong> in the browser.</p>
+  </details>
+
+  <details>
+    <summary>It says &ldquo;USB install needed&rdquo;</summary>
+    <div class="shots one">
+      <figure><img class="screen" src="../screens/update-13-usb-install-needed.png" width="410" height="502" alt="USB install needed screen giving a web address to open on a computer" loading="lazy"></figure>
+    </div>
+    <p>Very occasionally an update changes something that can't be installed over Wi-Fi. On a computer with <strong>Chrome or Edge</strong>, open the address the watch shows, plug the watch in with its USB-C cable, click <strong>Connect</strong>, choose the watch, and then <strong>Install Honu Watch</strong>. Keep the cable connected until it says it has finished.</p>
+  </details>
+
+  <details>
+    <summary>The watch seems stuck</summary>
+    <p>Press the <kbd>upper button</kbd>: it cancels the update and returns to the putting app at any point. If the watch still doesn't respond, press the <kbd>upper button</kbd> to put it to sleep, wake it with the <kbd>lower button</kbd>, and start again from step&nbsp;1.</p>
+  </details>
+
+  <details>
+    <summary>Is this safe?</summary>
+    <p>The watch only downloads updates from the official Honu Watch page, over a secure connection whose identity it checks, and it verifies every download before installing it. Your Wi-Fi password is stored only on the watch.</p>
+  </details>
+</section>
+
+<footer>
+  <p>The screens shown here use example names and version numbers.</p>
+</footer>
+
+</div>
+</body>
+</html>
