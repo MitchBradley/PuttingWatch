@@ -51,6 +51,13 @@ kbd, .btn {
 .btn.go { background: #1b7f3b; }
 .btn.grey { background: #3a3a3a; }
 
+.guide-nav { display: flex; flex-wrap: wrap; gap: .4rem .5rem; margin: .2rem 0 1rem; }
+.guide-nav a {
+  text-decoration: none; padding: .3rem .85rem; border-radius: 2rem; font-size: .95rem; font-weight: 600;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg);
+}
+.guide-nav a[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 .toc { background: var(--card); border: 1px solid var(--line); border-radius: .9rem; padding: .8rem 1.1rem; margin: 1.2rem 0 2rem; }
 .toc p { margin: 0 0 .3rem; font-weight: 700; }
 .toc ul { margin: 0; padding: 0; list-style: none; }
