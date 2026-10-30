@@ -12,3 +12,13 @@
 #ifndef OTA_MANIFEST_URL
 #define OTA_MANIFEST_URL OTA_SITE_URL "manifest.json"
 #endif
+
+// Where the Bye screen's QR codes point. The guide is the page the release
+// workflow publishes next to the firmware (docs/guide/using.html); the
+// watch is a Honu Golf product.
+#ifndef HELP_URL
+#define HELP_URL OTA_SITE_URL "guide/using.html"
+#endif
+#ifndef HONU_URL
+#define HONU_URL "https://honugolf.com"
+#endif

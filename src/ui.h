@@ -36,6 +36,15 @@ void render(const Snapshot& s);
 // (typically with the watch out of sight) could be.
 void showByeScreen();
 
+// The Bye screen's Help / Honu buttons each replace it with a full-screen QR
+// code (guide page / honugolf.com). While one is up, the caller keeps the
+// Bye screen alive instead of powering off: poll byeQrActive(), call
+// byeTick() to apply the 60 s auto-dismiss, and dismissByeQr() on the upper
+// side button. Dismissing returns to the Bye screen.
+bool byeQrActive();
+void byeTick();
+void dismissByeQr();
+
 // Raised by the view; wired to the tracker in main.
 extern std::function<void()> onTap;                    // screen tapped (start calibration)
 extern std::function<void()> onRecal;

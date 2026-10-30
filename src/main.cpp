@@ -424,8 +424,17 @@ static void enterPmuShutdown() {
     // Stop must not land on Update, so swallow touches for the first moment.
     touch->IIC_Interrupt_Flag = false;
     touchIgnoreUntilMs = millis() + 500;
+    // Help / Honu replace it with a QR page for up to a minute (the upper
+    // button, BOOT, dismisses it); the power-off countdown restarts when we
+    // get back to the Bye screen.
+    bool bootWasDown = digitalRead(BTN_BOOT) == LOW;  // the press that got us here
     for (uint32_t t0 = millis(); millis() - t0 < kByeMs;) {
-        lv_timer_handler();  // services the button; a press restarts the chip from here
+        lv_timer_handler();  // services the buttons; Update restarts the chip from here
+        ui::byeTick();
+        bool bootDown = digitalRead(BTN_BOOT) == LOW;
+        if (bootDown && !bootWasDown) ui::dismissByeQr();
+        bootWasDown = bootDown;
+        if (ui::byeQrActive()) t0 = millis();
         delay(10);
     }
 

@@ -5,6 +5,7 @@
 #include <cstring>
 #include "pin_config.h"
 #include "app_config.h"
+#include "update_config.h"
 #include "honu_img.h"
 
 namespace ui {
@@ -33,6 +34,15 @@ lv_obj_t* plusBtn = nullptr;
 lv_obj_t* updateBtn = nullptr;      // Bye screen only: reboot into firmware-update mode
 lv_obj_t* versionLabel = nullptr;   // waiting screen only: firmware version, along the bottom
 lv_obj_t* byeLabel = nullptr;
+lv_obj_t* helpBtn = nullptr;        // Bye screen only: QR code for the guide
+lv_obj_t* honuBtn = nullptr;        // Bye screen only: QR code for honugolf.com
+lv_obj_t* qrTitle = nullptr;        // QR page: what the code is for
+lv_obj_t* qrBox = nullptr;          // QR page: white quiet-zone square
+lv_obj_t* qrCode = nullptr;
+lv_obj_t* qrHint = nullptr;         // QR page: how to leave
+bool qrShowing = false;
+uint32_t qrShownMs = 0;
+constexpr uint32_t kQrTimeoutMs = 60000;  // back to Bye if nobody dismisses it
 
 // Background colours, matching ContentView.swift's palette intent.
 constexpr uint32_t kBgWaiting = 0xFFFFFF;   // white - behind the Honu image
@@ -81,6 +91,22 @@ void setHidden(lv_obj_t* o, bool hidden) {
     else
         lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
 }
+
+void showQr(const char* title, const char* url) {
+    setHidden(byeLabel, true);
+    setHidden(helpBtn, true);
+    setHidden(honuBtn, true);
+    setHidden(updateBtn, true);
+    lv_label_set_text(qrTitle, title);
+    lv_qrcode_update(qrCode, url, strlen(url));
+    setHidden(qrTitle, false);
+    setHidden(qrBox, false);
+    setHidden(qrHint, false);
+    qrShowing = true;
+    qrShownMs = millis();
+}
+void helpClicked(lv_event_t*) { showQr("Help", HELP_URL); }
+void honuClicked(lv_event_t*) { showQr("Honu", HONU_URL); }
 
 // Big fingertip target: fixed size + a generous invisible margin that still
 // registers a press. `font` is the label font (montserrat 28 or 48).
@@ -162,6 +188,43 @@ void init(const char* firmwareVersion) {
                          &lv_font_montserrat_48);
     lv_obj_add_flag(minusBtn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(plusBtn, LV_OBJ_FLAG_HIDDEN);
+
+    // "Help" / "Honu": on the Bye screen only, across the top like Recal/Stop
+    // (which are hidden there). Each shows a QR code page - see showQr().
+    helpBtn = makeButton("Help", helpClicked, LV_ALIGN_TOP_MID, -88, 12, 150, 82,
+                         &lv_font_montserrat_28);
+    honuBtn = makeButton("Honu", honuClicked, LV_ALIGN_TOP_MID, 88, 12, 150, 82,
+                         &lv_font_montserrat_28);
+    for (lv_obj_t* b : {helpBtn, honuBtn}) {
+        lv_obj_set_style_bg_color(b, lv_color_hex(0x3A3A3A), 0);
+        lv_obj_set_style_bg_color(b, lv_color_hex(0x1B7F3B), LV_STATE_PRESSED);
+        lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // The QR page both buttons share: title, QR on a white square (QR codes
+    // need a light quiet zone around them on a dark screen), and how to leave.
+    qrTitle = lv_label_create(root);
+    lv_obj_set_style_text_font(qrTitle, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_color(qrTitle, lv_color_white(), 0);
+    lv_obj_align(qrTitle, LV_ALIGN_TOP_MID, 0, 30);
+    lv_label_set_text(qrTitle, "");
+    qrBox = lv_obj_create(root);
+    lv_obj_remove_style_all(qrBox);
+    lv_obj_set_size(qrBox, 280, 280);
+    lv_obj_set_style_bg_color(qrBox, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(qrBox, LV_OPA_COVER, 0);
+    lv_obj_align(qrBox, LV_ALIGN_CENTER, 0, 10);
+    qrCode = lv_qrcode_create(qrBox);
+    lv_qrcode_set_size(qrCode, 252);
+    lv_qrcode_set_dark_color(qrCode, lv_color_black());
+    lv_qrcode_set_light_color(qrCode, lv_color_white());
+    lv_obj_center(qrCode);
+    qrHint = lv_label_create(root);
+    lv_obj_set_style_text_font(qrHint, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(qrHint, lv_color_hex(0x909090), 0);
+    lv_obj_align(qrHint, LV_ALIGN_BOTTOM_MID, 0, -34);
+    lv_label_set_text(qrHint, "Upper button to go back");
+    for (lv_obj_t* o : {qrTitle, qrBox, qrHint}) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
 
     // "Update": on the Bye screen only, below the "Bye" text. Not on the "Tap
     // when in putting position" screen, where it was too easy to hit by
@@ -246,12 +309,30 @@ void showByeScreen() {
     setHidden(minusBtn, true);
     setHidden(plusBtn, true);
     setHidden(versionLabel, true);
+    setHidden(qrTitle, true);
+    setHidden(qrBox, true);
+    setHidden(qrHint, true);
+    qrShowing = false;
     setHidden(byeLabel, false);
+    setHidden(helpBtn, false);
+    setHidden(honuBtn, false);
     setHidden(updateBtn, false);
     lv_obj_move_foreground(byeLabel);
+    lv_obj_move_foreground(helpBtn);
+    lv_obj_move_foreground(honuBtn);
     lv_obj_move_foreground(updateBtn);
     lv_refr_now(nullptr);  // force the flush now - normal render() cadence
                             // (~20 Hz) may not get another chance to run
+}
+
+bool byeQrActive() { return qrShowing; }
+
+void dismissByeQr() {
+    if (qrShowing) showByeScreen();
+}
+
+void byeTick() {
+    if (qrShowing && millis() - qrShownMs >= kQrTimeoutMs) dismissByeQr();
 }
 
 // render() is called ~20x/s. It MUST only touch an LVGL object when that
