@@ -64,12 +64,16 @@ def main():
     ap.add_argument("--min-version", default="0.0.0",
                     help="oldest installed version allowed to update over the air to this one")
     ap.add_argument("--notes", default="", help="one-line release summary")
+    ap.add_argument("--released", help="UTC timestamp (YYYY-MM-DDTHH:MM:SSZ) to record instead of "
+                    "now - when republishing an existing release, so its manifest comes out unchanged")
     ap.add_argument("--repo-url", default="", help="GitHub repo URL, for the install page footer")
     a = ap.parse_args()
 
     for name, v in (("--version", a.version), ("--min-version", a.min_version)):
         if not VERSION_RE.match(v):
             sys.exit(f"error: {name} '{v}' is not MAJOR.MINOR.PATCH[-prerelease]")
+    if a.released and not re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", a.released):
+        sys.exit(f"error: --released '{a.released}' is not YYYY-MM-DDTHH:MM:SSZ")
     for p in (a.firmware, a.factory, a.template):
         if not os.path.isfile(p):
             sys.exit(f"error: {p} not found")
@@ -82,7 +86,7 @@ def main():
     shutil.copy(a.firmware, os.path.join(a.out, rel_dir, "firmware.bin"))
     shutil.copy(a.factory, os.path.join(a.out, rel_dir, "firmware.factory.bin"))
 
-    released = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    released = a.released or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     notes = a.notes.strip()[:200]
 
     write_json(os.path.join(a.out, "manifest.json"), {

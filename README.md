@@ -207,6 +207,20 @@ firmware's own version string equals the tag, then publishes:
 Pages only ever holds the newest release. "Run workflow" on the Actions tab
 builds and tests without publishing - a quick way to check CI is healthy.
 
+**Publishing only the docs.** Changes under `docs/` (and the installer page
+template) go live by themselves when they reach `main`, with no firmware
+release, via `.github/workflows/docs.yml`; it can also be run by hand from the
+Actions tab. Pages replaces the whole site on every deploy and the firmware and
+OTA manifest live in it, so that workflow rebuilds the site from the release
+that is currently live and refuses to deploy if the regenerated manifest
+differs in any way from the live one. Two things to know:
+
+- It deploys from `main`, so the `github-pages` environment must allow that
+  branch as well as `v*` tags (Settings → Environments → github-pages →
+  Deployment branches and tags).
+- The guide comes from `main` but the firmware is the latest release, so avoid
+  merging guide text that describes firmware you haven't released yet.
+
 `manifest.json` carries `version`, `url`, `size`, `sha256`, `min_version`,
 `released` and `notes`. Watches in the field depend on it, so **only ever add
 optional fields to it - never rename or repurpose one.**
