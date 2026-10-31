@@ -88,6 +88,7 @@ fn main() {
         Ok(()) => log::info!("QMI8658 WHO_AM_I = 0x{:02X} (expect 0x05)", who[0]),
         Err(e) => {
             log::error!("QMI8658 WHO_AM_I read failed: {e:?}");
+            confirm_firmware(false); // reverts to the previous firmware if this image is an unconfirmed OTA
             return;
         }
     }
@@ -115,6 +116,8 @@ fn main() {
     .expect("audio init");
 
     let mut touch = touch::Touch::new(&mut i2c, p.pins.gpio10.into(), p.pins.gpio15.into());
+    // The IMU, codec and display all came up: this image is healthy.
+    confirm_firmware(true);
     // BOOT (GPIO9): idle high, low while pressed. Doubles as the shutdown button.
     let boot = PinDriver::input(p.pins.gpio9, Pull::Up).unwrap();
 
@@ -425,4 +428,29 @@ fn light_sleep(
     }
     log::info!("woke from light sleep");
     ui_state.lock().unwrap().panel = Panel::On;
+}
+
+/// OTA rollback handshake. With rollback enabled in the bootloader, a freshly OTA'd image boots as
+/// PENDING_VERIFY; if it never confirms itself, the bootloader reverts to the previous firmware at
+/// the next reset. Confirm once the hardware has actually come up (a crash or reset before this
+/// point rolls back on its own); `healthy == false` rolls back immediately. A USB-flashed or
+/// already-confirmed image has nothing to decide.
+fn confirm_firmware(healthy: bool) {
+    use esp_idf_svc::sys::*;
+    unsafe {
+        let running = esp_ota_get_running_partition();
+        let mut state: esp_ota_img_states_t = 0;
+        if esp_ota_get_state_partition(running, &mut state) != ESP_OK
+            || state != esp_ota_img_states_t_ESP_OTA_IMG_PENDING_VERIFY
+        {
+            return;
+        }
+        if healthy {
+            esp_ota_mark_app_valid_cancel_rollback();
+            log::info!("OTA image confirmed valid");
+        } else {
+            log::error!("OTA image failed its self-check - rolling back");
+            esp_ota_mark_app_invalid_rollback_and_reboot();
+        }
+    }
 }

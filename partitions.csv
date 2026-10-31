@@ -1,0 +1,17 @@
+# Partition table for 16 MB flash (ESP32-C6 board): dual-OTA.
+#
+# The partition table cannot be changed over the air - changing this layout
+# later means every device needs a USB reflash - so the app slots are sized
+# with plenty of headroom (the firmware is ~2 MB today) and a spare data
+# area is left for a future filesystem (e.g. updatable audio assets).
+#
+# otadata sits at 0xe000, the same address boot_app0.bin is flashed to, so an
+# ordinary USB upload initialises it correctly.
+#
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x9000,    0x5000,
+otadata,    data, ota,      0xe000,    0x2000,
+app0,       app,  ota_0,    0x10000,   0x500000,
+app1,       app,  ota_1,    0x510000,  0x500000,
+coredump,   data, coredump, 0xA10000,  0x10000,
+spiffs,     data, spiffs,   0xA20000,  0x5E0000,
