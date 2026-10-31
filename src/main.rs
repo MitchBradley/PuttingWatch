@@ -1,3 +1,5 @@
+mod co5300;
+
 use esp_idf_svc::hal::delay::{FreeRtos, BLOCK};
 use esp_idf_svc::hal::i2c::{I2cConfig, I2cDriver};
 use esp_idf_svc::hal::peripherals::Peripherals;
@@ -17,6 +19,42 @@ fn name_for(addr: u8) -> &'static str {
     }
 }
 
+fn rgb565(r: u8, g: u8, b: u8) -> [u8; 2] {
+    let v = ((r as u16 & 0xF8) << 8) | ((g as u16 & 0xFC) << 3) | (b as u16 >> 3);
+    v.to_be_bytes()
+}
+
+/// Colour bars (top 400 lines) over a grey ramp, drawn in 50-line strips.
+fn test_pattern(rst: esp_idf_svc::hal::gpio::AnyOutputPin) {
+    use co5300::{HEIGHT, WIDTH};
+    const STRIP: usize = 50;
+    let mut strip = vec![0u8; WIDTH * STRIP * 2];
+    let lcd = co5300::Co5300::new(rst, strip.len());
+    let bars = [
+        (255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0),
+        (255, 0, 255), (255, 0, 0), (0, 0, 255), (0, 0, 0),
+    ];
+    let mut y = 0;
+    while y < HEIGHT {
+        let h = STRIP.min(HEIGHT - y);
+        for row in 0..h {
+            for x in 0..WIDTH {
+                let (r, g, b) = if y + row < 400 {
+                    bars[x * bars.len() / WIDTH]
+                } else {
+                    let v = (x * 255 / (WIDTH - 1)) as u8;
+                    (v, v, v)
+                };
+                let i = (row * WIDTH + x) * 2;
+                strip[i..i + 2].copy_from_slice(&rgb565(r, g, b));
+            }
+        }
+        lcd.blit(0, y as u16, WIDTH as u16, h as u16, &strip[..h * WIDTH * 2]);
+        y += h;
+    }
+    log::info!("test pattern drawn");
+}
+
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
@@ -24,6 +62,8 @@ fn main() {
     let p = Peripherals::take().unwrap();
     let cfg = I2cConfig::new().baudrate(Hertz(400_000));
     let mut i2c = I2cDriver::new(p.i2c0, p.pins.gpio8, p.pins.gpio7, &cfg).unwrap();
+
+    test_pattern(p.pins.gpio11.into());
 
     FreeRtos::delay_ms(400);
     log::info!("===== I2C scan (SDA=8 SCL=7) =====");
