@@ -1,6 +1,6 @@
 [package]
 name = "putting-watch-rs"
-version = "0.1.0"
+version = "0.1.6-rust.1"
 authors = ["Mitch Bradley <wmb@firmworks.com>"]
 edition = "2021"
 resolver = "2"
