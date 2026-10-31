@@ -12,7 +12,7 @@ class Battery;
 // work itself runs in that module's own task.
 namespace updateui {
 
-// Build the screens on the active LVGL screen and start the update engine.
+// Build the screens with MiniUi and start the update engine.
 // `runningVersion` is this firmware's version string; it must outlive the call.
 void begin(const char* runningVersion, Battery& battery);
 

@@ -1,9 +1,10 @@
 #pragma once
+#include <cstdint>
 #include <functional>
 #include "SwingTracker.h"
 
-// LVGL view layer. Builds the screen once (init), then render() pushes a
-// plain snapshot of Model state onto it each frame. No swing logic here -
+// View layer (MiniUi widgets). Builds the screen once (init), then render()
+// pushes a plain snapshot of Model state onto it each frame. No swing logic here -
 // user input comes back out through the std::function hooks, which main wires
 // to the SwingTracker.
 namespace ui {
@@ -44,6 +45,14 @@ void showByeScreen();
 bool byeQrActive();
 void byeTick();
 void dismissByeQr();
+
+// Once per loop pass: read the touch controller, end finished touches and
+// repaint whatever changed. (Everything on screen is drawn from here.)
+void update();
+// Repaint the whole screen (after the panel was blanked or redrawn behind our back).
+void invalidateAll();
+// Time since the last touch report.
+uint32_t idleMs();
 
 // Raised by the view; wired to the tracker in main.
 extern std::function<void()> onTap;                    // screen tapped (start calibration)

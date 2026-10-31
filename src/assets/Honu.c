@@ -4,9 +4,9 @@
  * assets/Honu.png via "Export as C-Source", RGB565 16-bit):
  *   1. the three glib typedefs below,
  *   2. #include of the wrapper header,
- *   3. the lv_image_dsc_t honu_img definition at the end of the file.
- * GIMP writes the 16-bit pixels little-endian, which is already LVGL's native
- * RGB565 order on this build (verified from pixel 0: 0x9E,0xF7 = 0xF79E), so
+ *   3. the mui_image_t definition at the end of the file (was an lv_image_dsc_t).
+ * GIMP writes the 16-bit pixels little-endian, which is already the panel's native
+ * RGB565 order (verified from pixel 0: 0x9E,0xF7 = 0xF79E), so
  * the data is used verbatim - no copy, no byte swap. ~305 KB in flash. */
 #include "../honu_img.h"
 typedef unsigned int guint;
@@ -15175,16 +15175,9 @@ static const struct {
 };
 
 /* --- PuttingWatch wrapper (edit #3) --------------------------------------- */
-const lv_image_dsc_t honu_img = {
-    .header = {
-        .magic = LV_IMAGE_HEADER_MAGIC,
-        .cf = LV_COLOR_FORMAT_RGB565,
-        .flags = 0,
-        .w = 410,
-        .h = 380,
-        .stride = 410 * 2,
-    },
-    .data_size = 410 * 380 * 2,
-    .data = gimp_image.pixel_data,
+const mui_image_t honu_img = {
+    .w = 410,
+    .h = 380,
+    /* 2-byte aligned: the struct starts on a word boundary and the fields before the array are 4-byte types */
+    .px = (const uint16_t*)gimp_image.pixel_data,
 };
-

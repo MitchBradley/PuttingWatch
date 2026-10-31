@@ -76,21 +76,22 @@ need to hit putts harder or softer.
 | `lib/Clicker/` | Feedback renderer — ES8311 codec + speaker over I2S, playback on its own task | 🔨 compiles; runtime needs board |
 | `lib/Es8311/` | Vendored ES8311 codec driver (Espressif/Waveshare) | — |
 | `lib/Battery/` | AXP2101 battery-percentage readout (XPowersLib) | 🔨 compiles; runtime needs board |
-| `src/ui.*` | LVGL 9 view: state-mapped screens, background tint, click-interval slider | 🔨 compiles; runtime needs board |
-| `src/main.cpp` | Board bring-up + wiring; 100 Hz sampling task on core 1, LVGL on core 0 | 🔨 compiles; runtime needs board |
+| `src/ui.*` | The screens (on `lib/MiniUi`): state-mapped layouts, background tint, click-interval buttons | 🔨 compiles; runtime needs board |
+| `src/main.cpp` | Board bring-up + wiring; 100 Hz sampling task on core 0, UI on core 1 | 🔨 compiles; runtime needs board |
 | `assets/Honu.png` | Waiting-screen image, original art | — |
 | `src/assets/Honu.c`, `src/assets/HonuBottom.c` | GIMP RGB565 C-source exports, compiled directly, each with a small documented wrapper (`honu_img` = waiting screen, `honu_bottom_img` = "Hold still" screen; ~305 KB flash each, no runtime conversion). `src/honu_img.h` declares both. | — |
 | `assets/{one..twenty_five}.wav` | Piper-synthesised spoken numbers (female voice) — see [Regenerating spoken-number audio](#regenerating-spoken-number-audio-piper). | — |
 | `src/assets/numbers_audio.c` | Generated from the WAVs by `tools/wav2c_numbers.py` (16 kHz mono 16-bit, trimmed/normalised). `Clicker::playNumber()` speaks the value on `−`/`+` and after a swing completes. Regenerate after editing the WAVs. | — |
 | `lib/Arduino_DriveBus/` | Vendored Waveshare FT3168 touch driver (not on the PlatformIO registry) | — |
 | `include/pin_config.h` | Full board pin map | — |
-| `include/lv_conf.h` | LVGL 9.3 config (from Waveshare's examples, demos off) | — |
+| `lib/MiniUi/` | Small retained-mode widget layer (labels, buttons, bar, images, QR) on Arduino_GFX, with partial repaints and touch hit-testing; replaced LVGL. Text is Arduino_GFX's u8g2-format renderer, fonts in `src/assets/ui_fonts.h` (regenerate with `tools/extract_u8g2_fonts.py`) | 🔨 compiles; runtime needs board |
+| `lib/Qrcodegen/` | Nayuki's QR code generator (MIT), vendored | — |
 
 ## Architecture
 
 Strict Model / renderer / wiring split, carried over from the Swift app:
 
-- **`SwingTracker`** owns *all* stroke logic. It has no idea LVGL or audio
+- **`SwingTracker`** owns *all* stroke logic. It has no idea the UI or audio
   exist. Driven by `update(MotionSample)` at a fixed rate; all timing comes
   from `sample.t_ms`.
 - **`Clicker`** is a pure renderer: `playClick()` / `playBeep(n)`, no logic.
@@ -125,9 +126,8 @@ watch. Regenerate after any layout change:
 python3 tools/screenshots/render_screens.py
 ```
 
-It builds LVGL as a desktop program once (about a minute, cached in
-`.pio/screenshots/`) and then takes a few seconds. Needs LVGL's sources, which
-`pio run -e esp32c6` fetches. To add a screen, add a scene to
+It builds the UI code and Arduino_GFX as a desktop program (cached in
+`.pio/screenshots/`; a few seconds after the first run). To add a screen, add a scene to
 `tools/screenshots/screens.cpp`. The physical panel's rounded corners are not
 reproduced.
 

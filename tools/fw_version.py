@@ -1,7 +1,7 @@
 """PlatformIO pre-build script: write include/fw_version.h from `git describe`.
 
 A header (not a -D flag) so a new commit only recompiles the file(s) that
-include it - a build flag would change for every source, including LVGL and
+include it - a build flag would change for every source, including large libraries and
 Arduino_GFX, and defeat the fast routine rebuilds platformio.ini is tuned for.
 The file is only rewritten when the version actually changes.
 

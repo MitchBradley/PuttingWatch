@@ -2,8 +2,8 @@
 
 /* PuttingWatch edits to the GIMP export (re-apply if regenerated from GIMP
  * "Export as C-Source", RGB565 16-bit): the three glib typedefs, the
- * #include, and the lv_image_dsc_t honu_bottom_img at the end. Same
- * little-endian-RGB565 = LVGL-native situation as Honu.c - used verbatim. */
+ * #include, and the mui_image_t honu_bottom_img at the end. Same
+ * little-endian-RGB565 = panel-native situation as Honu.c - used verbatim. */
 #include "../honu_img.h"
 typedef unsigned int guint;
 typedef unsigned char guint8;
@@ -15204,16 +15204,9 @@ static const struct {
 };
 
 /* --- PuttingWatch wrapper ----------------------------------------------- */
-const lv_image_dsc_t honu_bottom_img = {
-    .header = {
-        .magic = LV_IMAGE_HEADER_MAGIC,
-        .cf = LV_COLOR_FORMAT_RGB565,
-        .flags = 0,
-        .w = 410,
-        .h = 380,
-        .stride = 410 * 2,
-    },
-    .data_size = 410 * 380 * 2,
-    .data = gimp_image.pixel_data,
+const mui_image_t honu_bottom_img = {
+    .w = 410,
+    .h = 380,
+    /* 2-byte aligned: the struct starts on a word boundary and the fields before the array are 4-byte types */
+    .px = (const uint16_t*)gimp_image.pixel_data,
 };
-

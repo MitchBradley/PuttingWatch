@@ -10,7 +10,7 @@
 //   lib/PuttingCore  - SwingTracker (Model) + GravityFilter, pure C++, unit-tested
 //   lib/Imu          - QMI8658 driver wrapper
 //   lib/Clicker      - feedback renderer (ES8311 codec + speaker, own task)
-//   src/ui.*         - LVGL view
+//   src/ui.*         - the screens (MiniUi widgets on Arduino_GFX)
 //
 // STATUS: pure logic (lib/PuttingCore) is host-tested; everything in this file
 // is a first cut pending on-device bring-up (see plan M0-M4).
@@ -23,7 +23,7 @@
 #include <esp_system.h>
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
-#include <lvgl.h>
+#include "MiniUi.h"
 #include "Arduino_GFX_Library.h"
 #include "Arduino_DriveBus_Library.h"
 #include "HWCDC.h"
@@ -150,7 +150,7 @@ static uint32_t touchIgnoreUntilMs = 0;         // swallow the light-sleep wake 
 
 // AMOLED power. On the run (Monitoring) screen the panel is blanked (DISPOFF)
 // while idle - you're watching the ball, not the watch. While blanked, loop()
-// runs its lean blankedLoop() path: no LVGL, no rendering, just a wake-tap
+// runs its lean blankedLoop() path: no UI rendering, just a wake-tap
 // poll and the re-arm cue, with a longer delay so core 1 mostly idles. Any
 // tap wakes it (full brightness for kBrightHoldMs); the wake tap is swallowed
 // so it can't blind-press a control. Other screens stay on. A double
@@ -201,59 +201,29 @@ static constexpr uint32_t kAngleWakeHoldMs       = 10000;
 static uint32_t lastAngleWakeMs      = 0;      // set on the rising edge past the threshold
 static bool     angleWasOverThreshold = false;  // edge state, maintained in both loop modes
 
-// LVGL draw buffer (partial mode). 100 lines so the tallest dynamic element
-// (the montserrat-48 angle label, a fixed 70 px box - see ui.cpp) always
-// redraws in a SINGLE tile => one monotonic top-to-bottom QSPI push, no
-// tearing. Prefer INTERNAL RAM (software render is much faster there than
-// into PSRAM); fall back to PSRAM if that block isn't free.
+// MiniUi strip buffer: 100 lines so the tallest dynamic element (the 48 px
+// angle label, a fixed 70 px box - see ui.cpp) always repaints in a SINGLE
+// strip => one monotonic top-to-bottom QSPI push, no tearing. Prefer INTERNAL
+// RAM; fall back to PSRAM if that block isn't free.
 static constexpr uint32_t kBufLines = 100;  // 410 * 100 * 2 = ~82 KB
-static lv_color_t* drawBuf = nullptr;
+static uint16_t* drawBuf = nullptr;
 
 // ---------------------------------------------------------------------------
-// LVGL glue.
+// Touch source for MiniUi: one report per FT3168 interrupt.
 // ---------------------------------------------------------------------------
-static uint32_t lvglTick() { return millis(); }
-
-static void dispFlush(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
-    uint32_t w = lv_area_get_width(area);
-    uint32_t h = lv_area_get_height(area);
-    gfx->draw16bitRGBBitmap(area->x1, area->y1, reinterpret_cast<uint16_t*>(px_map), w, h);
-    lv_display_flush_ready(disp);
-}
-
-// CO5300 (the SH8601 family of QSPI AMOLED controllers) wants every partial
-// update window to start on an even pixel and end on an odd one, in both
-// axes; an odd-aligned window leaves a stray column of wrong pixels - seen as
-// a thin vertical stripe on the auto-centred update screens, whose widgets
-// land on odd x. Widen each invalidated area to that grid BEFORE LVGL renders
-// it (rounding in dispFlush would be too late: the buffer already holds
-// exactly the unrounded area). The panel is 410x502, so x2/y2 stay in range.
-static void roundInvalidArea(lv_event_t* e) {
-    lv_area_t* a = static_cast<lv_area_t*>(lv_event_get_param(e));
-    a->x1 &= ~1;
-    a->y1 &= ~1;
-    a->x2 |= 1;
-    a->y2 |= 1;
-}
-
-static void touchRead(lv_indev_t*, lv_indev_data_t* data) {
-    // Called every lv_timer_handler pass - do zero I2C traffic unless the
-    // touch IRQ actually fired.
-    if (!touch->IIC_Interrupt_Flag || (int32_t)(millis() - touchIgnoreUntilMs) < 0) {
-        data->state = LV_INDEV_STATE_RELEASED;
-        return;
-    }
+static bool touchRead(int* x, int* y) {
+    // Polled every loop pass - do zero I2C traffic unless the touch IRQ
+    // actually fired.
+    if (!touch->IIC_Interrupt_Flag || (int32_t)(millis() - touchIgnoreUntilMs) < 0) return false;
     touch->IIC_Interrupt_Flag = false;
-    data->point.x = touch->IIC_Read_Device_Value(
-        touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
-    data->point.y = touch->IIC_Read_Device_Value(
-        touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
-    data->state = LV_INDEV_STATE_PRESSED;
+    *x = touch->IIC_Read_Device_Value(touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
+    *y = touch->IIC_Read_Device_Value(touch->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
     lastTapMs = millis();  // hold the run screen on / re-arm the 5 s
+    return true;
 }
 
 // ---------------------------------------------------------------------------
-// Sampling task: fixed 100 Hz, pinned to core 0 (the Arduino loop + LVGL run
+// Sampling task: fixed 100 Hz, pinned to core 0 (the Arduino loop + the UI run
 // on core 1). Owns the IMU -> GravityFilter -> SwingTracker pipeline; the UI
 // only ever reads a snapshot of the result.
 // ---------------------------------------------------------------------------
@@ -331,7 +301,7 @@ static void enterLightSleep() {
     gfx->fillScreen(BLACK);
     // Amp stays off; the next loop() iteration re-enables it if we woke back
     // into the run state.
-    lv_obj_invalidate(lv_screen_active());  // full repaint
+    mui::invalidateAll();  // full repaint
 
     touch->IIC_Interrupt_Flag = false;
     touchIgnoreUntilMs = millis() + 400;  // don't let the wake tap hit a button
@@ -408,7 +378,7 @@ static void enterPmuShutdown() {
 
     // Visible feedback that the press registered, since the PMU rail-cut
     // that follows gives no other sign anything happened. Forces its own
-    // flush (lv_refr_now), so it's on screen even though loop()'s normal
+    // flush (mui::refresh), so it's on screen even though loop()'s normal
     // ~20 Hz render won't run again before displayOff(). Safe to call
     // whether or not the panel is currently on.
     ui::showByeScreen();
@@ -429,7 +399,7 @@ static void enterPmuShutdown() {
     // get back to the Bye screen.
     bool bootWasDown = digitalRead(BTN_BOOT) == LOW;  // the press that got us here
     for (uint32_t t0 = millis(); millis() - t0 < kByeMs;) {
-        lv_timer_handler();  // services the buttons; Update restarts the chip from here
+        ui::update();  // services the buttons; Update restarts the chip from here
         ui::byeTick();
         bool bootDown = digitalRead(BTN_BOOT) == LOW;
         if (bootDown && !bootWasDown) ui::dismissByeQr();
@@ -577,27 +547,17 @@ void setup() {
     }
     if (!battery.begin(Wire)) USBSerial.println("AXP2101 begin failed - no battery gauge");
 
-    // --- LVGL ---
-    lv_init();
-    lv_tick_set_cb(lvglTick);
-
-    size_t bufBytes = LCD_WIDTH * kBufLines * sizeof(lv_color_t);
-    drawBuf = static_cast<lv_color_t*>(
-        heap_caps_malloc(bufBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+    // --- MiniUi ---
+    const size_t bufPixels = (size_t)LCD_WIDTH * kBufLines;
+    drawBuf = static_cast<uint16_t*>(
+        heap_caps_malloc(bufPixels * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
     if (!drawBuf)
-        drawBuf = static_cast<lv_color_t*>(heap_caps_malloc(bufBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-
-    lv_display_t* disp = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
-    lv_display_set_flush_cb(disp, dispFlush);
-    lv_display_set_buffers(disp, drawBuf, nullptr, bufBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
-    lv_display_add_event_cb(disp, roundInvalidArea, LV_EVENT_INVALIDATE_AREA, nullptr);
-
-    lv_indev_t* indev = lv_indev_create();
-    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
-    lv_indev_set_read_cb(indev, touchRead);
+        drawBuf = static_cast<uint16_t*>(heap_caps_malloc(bufPixels * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    mui::init(gfx, drawBuf, bufPixels);
+    mui::setTouchSource(touchRead);
 
     if (updateMode) {
-        // Display, touch, LVGL and the PMU are up; everything else (IMU, audio,
+        // Display, touch and the PMU are up; everything else (IMU, audio,
         // swing tracker, sampling task) stays off. The firmware was already
         // confirmed valid on the normal boot that requested this.
         updateui::begin(FW_VERSION, battery);
@@ -684,11 +644,11 @@ static void serialLog() {
 static void wakeRunScreen() {
     bus->sendCommand(CO5300_C_DISPON);
     amoled->setBrightness(kBrightFull);
-    lv_obj_invalidate(lv_screen_active());
+    mui::invalidateAll();
     runScreenBlanked = false;
 }
 
-// Lean loop path while the run screen is blanked: no LVGL, no rendering. The
+// Lean loop path while the run screen is blanked: no UI rendering. The
 // 100 Hz sampling and the click audio run on core 0 regardless; here we only
 // poll for a wake tap and keep the re-arm cue going, then sleep kBlankedLoopMs
 // so core 1 mostly sits in waiti.
@@ -760,7 +720,7 @@ void loop() {
         return;
     }
 
-    lv_timer_handler();
+    ui::update();
     pollBattery();
 
     // Snapshot the Model at ~20 Hz for the view + the audio/power logic.
@@ -804,7 +764,7 @@ void loop() {
 
             // Power: run the CPU at 80 MHz in the run (Monitoring) state. The
             // workload there - 100 Hz sampling + gravity/swing math, 20 Hz
-            // partial LVGL render, on-demand audio - doesn't need 240 MHz, and
+            // partial UI repaints, on-demand audio - doesn't need 240 MHz, and
             // 80 MHz keeps the same 80 MHz APB clock so I2C/I2S/timers are
             // unaffected. Full speed elsewhere (boot, the image-heavy waiting
             // screen, calibration).
@@ -839,6 +799,6 @@ void loop() {
     serialLog();
 
     // Yield so the idle task on this core runs (feeds the task watchdog) -
-    // lv_timer_handler never blocks on its own.
+    // ui::update never blocks on its own.
     delay(2);
 }

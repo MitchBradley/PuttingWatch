@@ -1,7 +1,7 @@
 // Headless renderer for every Honu Watch screen, for the user guide.
 //
 // Drives the REAL src/ui.cpp (putting app) and src/update_ui.cpp (update
-// mode) on the host with a software-rendered LVGL display, so the captures
+// mode) on the host with MiniUi drawing into a RAM "panel", so the captures
 // have the firmware's actual fonts, layout, colours and QR codes. What is
 // faked is everything underneath: the clock, the battery, and the update
 // engine, whose status is set by hand for each screen.
@@ -11,14 +11,14 @@
 // Writes one raw RGB file per screen into the directory given as argv[1];
 // the Python script turns them into PNGs.
 
-#include <lvgl.h>
-
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
 
 #include "Arduino.h"
+#include "Arduino_GFX.h"
+#include "MiniUi.h"
 #include "Battery.h"
 #include "pin_config.h"
 #include "ui.h"
@@ -55,39 +55,40 @@ void changeWifi() {}
 // ---- display ----------------------------------------------------------------
 
 static const char* gOutDir = ".";
-static std::vector<uint8_t> gFrame(LCD_WIDTH * LCD_HEIGHT * 3);
-alignas(64) static uint8_t gDrawBuf[LCD_WIDTH * LCD_HEIGHT * 2 + 4096];
 
-static void flushCb(lv_display_t* disp, const lv_area_t*, uint8_t* px) {
-    if (lv_display_flush_is_last(disp)) {
-        const uint32_t stride = lv_draw_buf_width_to_stride(LCD_WIDTH, LV_COLOR_FORMAT_RGB565);
-        for (int y = 0; y < LCD_HEIGHT; y++) {
-            const uint16_t* src = reinterpret_cast<const uint16_t*>(px + y * stride);
-            uint8_t* dst = &gFrame[y * LCD_WIDTH * 3];
-            for (int x = 0; x < LCD_WIDTH; x++) {
-                uint16_t p = src[x];
-                uint8_t r = (p >> 11) & 31, g = (p >> 5) & 63, b = p & 31;
-                dst[x * 3 + 0] = (r << 3) | (r >> 2);
-                dst[x * 3 + 1] = (g << 2) | (g >> 4);
-                dst[x * 3 + 2] = (b << 3) | (b >> 2);
-            }
-        }
+// The panel: whatever MiniUi pushes lands in this frame buffer.
+class HostPanel : public Arduino_GFX {
+public:
+    HostPanel() : Arduino_GFX(LCD_WIDTH, LCD_HEIGHT), px_(LCD_WIDTH * LCD_HEIGHT, 0) {}
+    bool begin(int32_t = GFX_NOT_DEFINED) override { return true; }
+    void writePixelPreclipped(int16_t x, int16_t y, uint16_t c) override { px_[y * LCD_WIDTH + x] = c; }
+    void draw16bitRGBBitmap(int16_t x, int16_t y, uint16_t* bitmap, int16_t w, int16_t h) override {
+        for (int yy = 0; yy < h; yy++) memcpy(&px_[(y + yy) * LCD_WIDTH + x], bitmap + yy * w, w * 2);
     }
-    lv_display_flush_ready(disp);
-}
+    using Arduino_GFX::draw16bitRGBBitmap;
+    const std::vector<uint16_t>& pixels() const { return px_; }
 
-static void capture(const char* name, bool advanceClock = true) {
-    if (advanceClock) {
-        for (int i = 0; i < 3; i++) {
-            gNow += 120;
-            lv_timer_handler();
-        }
-    } else {
-        lv_timer_handler();
+private:
+    std::vector<uint16_t> px_;
+};
+
+static HostPanel gPanel;
+static std::vector<uint16_t> gStrip(LCD_WIDTH * 100);
+
+static void capture(const char* name) {
+    mui::update(gNow);
+    mui::invalidateAll();
+    mui::refresh();  // full redraw, flushed synchronously
+
+    std::vector<uint8_t> frame(LCD_WIDTH * LCD_HEIGHT * 3);
+    const std::vector<uint16_t>& px = gPanel.pixels();
+    for (int i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
+        uint16_t p = px[i];
+        uint8_t r = (p >> 11) & 31, g = (p >> 5) & 63, b = p & 31;
+        frame[i * 3 + 0] = (r << 3) | (r >> 2);
+        frame[i * 3 + 1] = (g << 2) | (g >> 4);
+        frame[i * 3 + 2] = (b << 3) | (b >> 2);
     }
-    lv_obj_invalidate(lv_screen_active());
-    lv_refr_now(nullptr);  // full redraw of the active screen, flushed synchronously
-
     char path[512];
     snprintf(path, sizeof(path), "%s/%s.rgb", gOutDir, name);
     FILE* f = fopen(path, "wb");
@@ -95,7 +96,7 @@ static void capture(const char* name, bool advanceClock = true) {
         fprintf(stderr, "cannot write %s\n", path);
         exit(1);
     }
-    fwrite(gFrame.data(), 1, gFrame.size(), f);
+    fwrite(frame.data(), 1, frame.size(), f);
     fclose(f);
     printf("captured %s\n", name);
 }
@@ -103,8 +104,7 @@ static void capture(const char* name, bool advanceClock = true) {
 // ---- the putting app's screens ----------------------------------------------
 
 static void putingAppScreens() {
-    lv_obj_t* scr = lv_obj_create(nullptr);
-    lv_screen_load(scr);
+    mui::reset();
     ui::init("0.1.1");
 
     ui::Snapshot s;
@@ -137,34 +137,29 @@ static void putingAppScreens() {
     ui::showByeScreen();
     capture("app-5-bye");
 
+    // The Bye screen's own buttons (Help, Honu, Update). Each press is a fresh
+    // touch: let the previous one end first.
+    auto press = [](int x, int y) {
+        gNow += 300;
+        mui::update(gNow);
+        mui::touch(x, y, gNow);
+    };
+    press(117, 53);  // Help
+    capture("app-8-bye-help-qr");
+    ui::dismissByeQr();
+    press(293, 53);  // Honu
+    capture("app-9-bye-honu-qr");
+    ui::dismissByeQr();
+
     // The Update button's two feedback states: held down, then clicked (which
     // relabels it just before the restart). The Bye screen is a one-way trip,
-    // so these come last. Its only visible button is Update.
-    // Its visible buttons, in creation order: Help, Honu, Update.
-    lv_obj_t* active = lv_screen_active();
-    lv_obj_t* update = nullptr;
-    lv_obj_t* btns[3] = {};
-    int nbtn = 0;
-    for (uint32_t i = 0; i < lv_obj_get_child_count(active); i++) {
-        lv_obj_t* c = lv_obj_get_child(active, i);
-        if (lv_obj_check_type(c, &lv_button_class) && !lv_obj_has_flag(c, LV_OBJ_FLAG_HIDDEN)) {
-            update = c;
-            if (nbtn < 3) btns[nbtn++] = c;
-        }
-    }
-    if (nbtn == 3) {
-        lv_obj_send_event(btns[0], LV_EVENT_CLICKED, nullptr);
-        capture("app-8-bye-help-qr");
-        ui::dismissByeQr();
-        lv_obj_send_event(btns[1], LV_EVENT_CLICKED, nullptr);
-        capture("app-9-bye-honu-qr");
-        ui::dismissByeQr();
-    }
+    // so these come last.
+    mui::Widget* update = mui::widgetAt(205, 361);
     if (update) {
-        lv_obj_add_state(update, LV_STATE_PRESSED);
+        update->setPressed(true);
         capture("app-6-bye-update-touched");
-        lv_obj_remove_state(update, LV_STATE_PRESSED);
-        lv_obj_send_event(update, LV_EVENT_CLICKED, nullptr);  // ui::onUpdate is unset here: no restart
+        update->setPressed(false);
+        press(205, 361);  // ui::onUpdate is unset here: no restart
         capture("app-7-bye-update-starting");
     }
 }
@@ -183,22 +178,13 @@ static void showUpdate(const char* name, const Status& st, int batteryPct = 82, 
     gNow = ((gNow / 2700) + 1) * 2700 + 900;
     updateui::loop();
     updateui::loop();
-    // The theme animates state changes (e.g. a button greying out) over ~200 ms.
-    // Let LVGL's animations finish by advancing the clock between ticks WITHOUT
-    // calling updateui::loop() again: its render pass is what reads the clock
-    // for the dots, so they keep the frame chosen above.
-    for (int i = 0; i < 5; i++) {
-        gNow += 100;
-        lv_timer_handler();
-    }
-    capture(name, /*advanceClock=*/false);
+    capture(name);
 }
 
 static void copy(char* dst, size_t n, const char* src) { snprintf(dst, n, "%s", src); }
 
 static void updateModeScreens() {
-    lv_obj_t* scr = lv_obj_create(nullptr);
-    lv_screen_load(scr);
+    mui::reset();
     static Battery battery;
     updateui::begin("0.1.1", battery);
 
@@ -265,11 +251,7 @@ static void updateModeScreens() {
 int main(int argc, char** argv) {
     if (argc > 1) gOutDir = argv[1];
 
-    lv_init();
-    lv_tick_set_cb([]() -> uint32_t { return gNow; });
-    lv_display_t* disp = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
-    lv_display_set_flush_cb(disp, flushCb);
-    lv_display_set_buffers(disp, gDrawBuf, nullptr, sizeof(gDrawBuf), LV_DISPLAY_RENDER_MODE_FULL);
+    mui::init(&gPanel, gStrip.data(), gStrip.size());
 
     putingAppScreens();
     updateModeScreens();

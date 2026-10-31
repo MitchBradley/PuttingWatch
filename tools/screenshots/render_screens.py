@@ -3,15 +3,12 @@
 
     python3 tools/screenshots/render_screens.py [--out docs/screens] [--montage FILE]
 
-This compiles the real src/ui.cpp and src/update_ui.cpp, plus LVGL itself, as a
-desktop program (tools/screenshots/screens.cpp) with a software-rendered display
-and fake clock/battery/update engine, then converts what it draws to PNGs. The
-captures therefore match the watch pixel for pixel - same fonts, layout, colours
-and QR codes - without needing the hardware. Re-run it after any layout change.
-
-Needs LVGL's sources, which PlatformIO has already fetched into
-.pio/libdeps/esp32c6/lvgl once the firmware has been built (`pio run -e esp32c6`).
-The LVGL objects are cached in .pio/screenshots/, so only the first run is slow.
+This compiles the real src/ui.cpp and src/update_ui.cpp, plus MiniUi and the
+Arduino_GFX text/graphics code, as a desktop program
+(tools/screenshots/screens.cpp) that draws into a RAM frame buffer with a fake
+clock/battery/update engine, then converts what it draws to PNGs. The captures
+therefore match the watch pixel for pixel - same fonts, layout, colours and QR
+codes - without needing the hardware. Re-run it after any layout change.
 
 If linking fails with "unknown architecture arm64e.x1-macos", that is a macOS
 Command Line Tools / Xcode SDK mismatch on the machine, not this script; point
@@ -38,30 +35,6 @@ CC = os.environ.get("CC", "cc")
 CXX = os.environ.get("CXX", "c++")
 
 
-def find_lvgl():
-    for env in ("esp32c6", "esp32c6-ldf", "esp32s3"):
-        p = ROOT / ".pio" / "libdeps" / env / "lvgl"
-        if (p / "lvgl.h").exists():
-            return p
-    sys.exit("LVGL not found under .pio/libdeps - run `pio run -e esp32c6` once first.")
-
-
-def host_lv_conf():
-    """The firmware's lv_conf.h, except it uses the C library's malloc: the
-    firmware's builtin pool is sized for the watch, not for a full-frame desktop render."""
-    src = (ROOT / "include" / "lv_conf.h").read_text()
-    needle = "#define LV_USE_STDLIB_MALLOC    LV_STDLIB_BUILTIN"
-    if needle not in src:
-        sys.exit("include/lv_conf.h changed shape: update host_lv_conf() in render_screens.py")
-    out = BUILD / "hostconf"
-    out.mkdir(parents=True, exist_ok=True)
-    conf = out / "lv_conf.h"
-    new = src.replace(needle, "#define LV_USE_STDLIB_MALLOC    LV_STDLIB_CLIB")
-    if not conf.exists() or conf.read_text() != new:
-        conf.write_text(new)
-    return out, conf
-
-
 def run(cmd):
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
@@ -69,12 +42,9 @@ def run(cmd):
         raise SystemExit(f"command failed ({r.returncode})")
 
 
-def compile_all(jobs, force_after):
+def compile_all(jobs, newest_dep):
     """jobs: (compiler, flags, source, object). Skips fresh objects."""
-    todo = []
-    for cc, flags, src, obj in jobs:
-        if (not obj.exists()) or obj.stat().st_mtime < max(src.stat().st_mtime, force_after):
-            todo.append((cc, flags, src, obj))
+    todo = [j for j in jobs if (not j[3].exists()) or j[3].stat().st_mtime < max(j[2].stat().st_mtime, newest_dep)]
     if not todo:
         return
     print(f"compiling {len(todo)} file(s)...", flush=True)
@@ -83,60 +53,50 @@ def compile_all(jobs, force_after):
 
 
 def build():
-    lvgl = find_lvgl()
-    hostconf, conf_file = host_lv_conf()
-    conf_mtime = conf_file.stat().st_mtime
-    obj_lv, obj_app = BUILD / "obj_lvgl", BUILD / "obj_app"
-    obj_lv.mkdir(parents=True, exist_ok=True)
-    obj_app.mkdir(parents=True, exist_ok=True)
-
-    inc_lvgl = ["-DLV_CONF_INCLUDE_SIMPLE", f"-I{hostconf}", f"-I{lvgl}", f"-I{lvgl}/src"]
-    cflags = ["-O1", "-w", "-std=gnu11", *inc_lvgl]
-    # The app's own sources: the shim directory FIRST so <Arduino.h> etc. resolve
-    # to the host stand-ins, and the host lv_conf.h before include/'s.
-    inc_app = [
-        "-DLV_CONF_INCLUDE_SIMPLE", f"-I{HERE / 'shim'}", f"-I{hostconf}", f"-I{lvgl}", f"-I{lvgl}/src",
-        f"-I{ROOT / 'include'}", f"-I{ROOT / 'src'}", f"-I{ROOT / 'src' / 'assets'}",
-        f"-I{ROOT / 'lib' / 'PuttingCore'}", f"-I{ROOT / 'lib' / 'UpdateCore'}",
-        f"-I{ROOT / 'lib' / 'Battery' / 'src'}",
+    obj = BUILD / "obj"
+    obj.mkdir(parents=True, exist_ok=True)
+    gfx = ROOT / "lib" / "Arduino_GFX" / "src"
+    # The shim directory FIRST so <Arduino.h> etc. resolve to the host stand-ins.
+    inc = [
+        f"-I{HERE / 'shim'}", f"-I{gfx}", f"-I{ROOT / 'include'}", f"-I{ROOT / 'src'}",
+        f"-I{ROOT / 'src' / 'assets'}", f"-I{ROOT / 'lib' / 'PuttingCore'}",
+        f"-I{ROOT / 'lib' / 'UpdateCore'}", f"-I{ROOT / 'lib' / 'MiniUi'}",
+        f"-I{ROOT / 'lib' / 'Qrcodegen'}", f"-I{ROOT / 'lib' / 'Battery' / 'src'}",
     ]
-    cxxflags = ["-O1", "-std=gnu++17", "-Wno-deprecated-declarations", *inc_app]
-    c_app_flags = ["-O1", "-w", "-std=gnu11", *inc_app]
-
-    jobs = []
-    for src in sorted((lvgl / "src").rglob("*.c")):
-        obj = obj_lv / (str(src.relative_to(lvgl / "src")).replace(os.sep, "_") + ".o")
-        jobs.append((CC, cflags, src, obj))
-    app = [
+    cxxflags = ["-O1", "-std=gnu++17", "-w", *inc]
+    cflags = ["-O1", "-w", "-std=gnu11", *inc]
+    sources = [
         (CXX, cxxflags, HERE / "screens.cpp"),
         (CXX, cxxflags, ROOT / "src" / "ui.cpp"),
         (CXX, cxxflags, ROOT / "src" / "update_ui.cpp"),
         (CXX, cxxflags, ROOT / "lib" / "UpdateCore" / "UpdateCore.cpp"),
-        (CC, c_app_flags, ROOT / "src" / "assets" / "Honu.c"),
-        (CC, c_app_flags, ROOT / "src" / "assets" / "HonuBottom.c"),
+        (CXX, cxxflags, ROOT / "lib" / "MiniUi" / "MiniUi.cpp"),
+        (CXX, cxxflags, gfx / "Arduino_GFX.cpp"),
+        (CXX, cxxflags, gfx / "Arduino_G.cpp"),
+        (CC, cflags, ROOT / "lib" / "Qrcodegen" / "qrcodegen.c"),
+        (CC, cflags, ROOT / "src" / "assets" / "Honu.c"),
+        (CC, cflags, ROOT / "src" / "assets" / "HonuBottom.c"),
     ]
-    app_objs = []
-    for cc, flags, src in app:
-        obj = obj_app / (src.name + ".o")
-        app_objs.append(obj)
-        jobs.append((cc, flags, src, obj))
+    jobs, objs = [], []
+    for cc, flags, src in sources:
+        o = obj / (src.name + ".o")
+        objs.append(o)
+        jobs.append((cc, flags, src, o))
 
-    # Anything the app sources include may have changed too: rebuild the app
-    # objects whenever any header/source they depend on is newer (cheap: 6 files).
+    # Anything the sources include may have changed too: rebuild everything
+    # whenever any header they depend on is newer (the file count is small).
     newest_dep = max(p.stat().st_mtime for p in [
-        *(ROOT / "src").glob("*.h"), *(ROOT / "include").glob("*.h"),
-        *(ROOT / "lib" / "UpdateCore").glob("*.h"), *(HERE / "shim").glob("*.h"), HERE / "screens.cpp",
+        *(ROOT / "src").glob("*.h"), *(ROOT / "src" / "assets").glob("*.h"),
+        *(ROOT / "include").glob("*.h"), *(ROOT / "lib" / "UpdateCore").glob("*.h"),
+        *(ROOT / "lib" / "MiniUi").glob("*.h"), *(HERE / "shim").glob("*.h"),
+        gfx / "Arduino_GFX.h", HERE / "screens.cpp",
     ])
-    lv_jobs = [j for j in jobs if j[3].parent == obj_lv]
-    app_jobs = [j for j in jobs if j[3].parent == obj_app]
-    compile_all(lv_jobs, conf_mtime)
-    compile_all(app_jobs, max(conf_mtime, newest_dep))
+    compile_all(jobs, newest_dep)
 
     exe = BUILD / "screens"
-    all_objs = sorted(obj_lv.glob("*.o")) + app_objs
-    if not exe.exists() or exe.stat().st_mtime < max(o.stat().st_mtime for o in all_objs):
+    if not exe.exists() or exe.stat().st_mtime < max(o.stat().st_mtime for o in objs):
         print("linking...", flush=True)
-        run([CXX, "-o", str(exe), *map(str, all_objs), "-lm"])
+        run([CXX, "-o", str(exe), *map(str, objs), "-lm"])
     return exe
 
 

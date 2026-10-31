@@ -5,7 +5,7 @@
 
 // SwingTracker - the Model. Owns ALL putting-stroke logic: calibration,
 // arming, click ratcheting, reversal detection, re-arm gating. Knows nothing
-// about LVGL, I2S, or Arduino - pure C++, host-compilable, unit-tested in
+// about the UI, I2S, or Arduino - pure C++, host-compilable, unit-tested in
 // test/test_swingtracker.
 //
 // Ported from PuttingCoachWatch/CalibrationManager.swift (the watch bring-up

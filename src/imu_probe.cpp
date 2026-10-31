@@ -1,4 +1,4 @@
-// Standalone QMI8658 hardware probe. Nothing else runs: no LVGL, no audio,
+// Standalone QMI8658 hardware probe. Nothing else runs: no UI, no audio,
 // no display, no touch, no sampling task - just Wire + SensorLib.
 //
 //   pio run -e imuprobe -t upload -t monitor
