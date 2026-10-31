@@ -1,4 +1,5 @@
 mod co5300;
+mod gfx;
 
 use esp_idf_svc::hal::delay::{FreeRtos, BLOCK};
 use esp_idf_svc::hal::i2c::{I2cConfig, I2cDriver};
@@ -19,40 +20,61 @@ fn name_for(addr: u8) -> &'static str {
     }
 }
 
-fn rgb565(r: u8, g: u8, b: u8) -> [u8; 2] {
-    let v = ((r as u16 & 0xF8) << 8) | ((g as u16 & 0xFC) << 3) | (b as u16 >> 3);
-    v.to_be_bytes()
+use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::prelude::*;
+use embedded_graphics::primitives::{Circle, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle};
+use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
+use u8g2_fonts::{fonts, FontRenderer};
+
+fn text<F: u8g2_fonts::Font>(t: &mut gfx::Strip, s: &str, x: i32, y: i32, c: Rgb565) {
+    let _ = FontRenderer::new::<F>().render_aligned(
+        s,
+        Point::new(x, y),
+        VerticalPosition::Baseline,
+        HorizontalAlignment::Center,
+        FontColor::Transparent(c),
+        t,
+    );
 }
 
-/// Colour bars (top 400 lines) over a grey ramp, drawn in 50-line strips.
-fn test_pattern(rst: esp_idf_svc::hal::gpio::AnyOutputPin) {
-    use co5300::{HEIGHT, WIDTH};
-    const STRIP: usize = 50;
-    let mut strip = vec![0u8; WIDTH * STRIP * 2];
-    let lcd = co5300::Co5300::new(rst, strip.len());
-    let bars = [
-        (255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0),
-        (255, 0, 255), (255, 0, 0), (0, 0, 255), (0, 0, 0),
-    ];
-    let mut y = 0;
-    while y < HEIGHT {
-        let h = STRIP.min(HEIGHT - y);
-        for row in 0..h {
-            for x in 0..WIDTH {
-                let (r, g, b) = if y + row < 400 {
-                    bars[x * bars.len() / WIDTH]
-                } else {
-                    let v = (x * 255 / (WIDTH - 1)) as u8;
-                    (v, v, v)
-                };
-                let i = (row * WIDTH + x) * 2;
-                strip[i..i + 2].copy_from_slice(&rgb565(r, g, b));
-            }
-        }
-        lcd.blit(0, y as u16, WIDTH as u16, h as u16, &strip[..h * WIDTH * 2]);
-        y += h;
-    }
-    log::info!("test pattern drawn");
+fn button(t: &mut gfx::Strip, r: Rectangle, label: &str, c: Rgb565) {
+    let _ = RoundedRectangle::with_equal_corners(r, Size::new(14, 14))
+        .into_styled(PrimitiveStyle::with_fill(c))
+        .draw(t);
+    text::<fonts::u8g2_font_logisoso22_tf>(t, label, r.center().x, r.center().y + 11, Rgb565::WHITE);
+}
+
+/// Roughly the app's main screen, to compare against the C++/MiniUi look.
+fn scene(t: &mut gfx::Strip) {
+    let blue = Rgb565::new(0x21 >> 3, 0x96 >> 2, 0xF3 >> 3);
+    let grey = Rgb565::new(0x3A >> 3, 0x3A >> 2, 0x3A >> 3);
+    let _ = t.clear(Rgb565::BLACK);
+
+    text::<fonts::u8g2_font_logisoso34_tf>(t, "Honu Watch", 205, 90, Rgb565::WHITE);
+    text::<fonts::u8g2_font_helvR14_tf>(t, "Tap when in putting position", 205, 130, Rgb565::CSS_LIGHT_GRAY);
+    let _ = Circle::with_center(Point::new(205, 250), 150)
+        .into_styled(PrimitiveStyleBuilder::new().fill_color(Rgb565::CSS_SEA_GREEN).stroke_color(Rgb565::WHITE).stroke_width(4).build())
+        .draw(t);
+    text::<fonts::u8g2_font_logisoso38_tf>(t, "12.5", 205, 265, Rgb565::WHITE);
+    button(t, Rectangle::new(Point::new(30, 370), Size::new(170, 60)), "Recal", blue);
+    button(t, Rectangle::new(Point::new(210, 370), Size::new(170, 60)), "Stop", blue);
+    button(t, Rectangle::new(Point::new(30, 440), Size::new(60, 50)), "-", grey);
+    button(t, Rectangle::new(Point::new(320, 440), Size::new(60, 50)), "+", grey);
+    let _ = Rectangle::new(Point::new(100, 455), Size::new(210, 20))
+        .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 2))
+        .draw(t);
+    let _ = Rectangle::new(Point::new(102, 457), Size::new(130, 16))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::CSS_LIME_GREEN))
+        .draw(t);
+    text::<fonts::u8g2_font_helvR12_tf>(t, "v0.1.5  87%", 205, 25, Rgb565::CSS_GRAY);
+}
+
+fn draw_screen(rst: esp_idf_svc::hal::gpio::AnyOutputPin) {
+    let mut buf = vec![0u8; co5300::WIDTH * gfx::STRIP_LINES * 2];
+    let lcd = co5300::Co5300::new(rst, buf.len());
+    let t0 = std::time::Instant::now();
+    gfx::render(&lcd, &mut buf, scene);
+    log::info!("full-screen render: {} ms", t0.elapsed().as_millis());
 }
 
 fn main() {
@@ -63,7 +85,7 @@ fn main() {
     let cfg = I2cConfig::new().baudrate(Hertz(400_000));
     let mut i2c = I2cDriver::new(p.i2c0, p.pins.gpio8, p.pins.gpio7, &cfg).unwrap();
 
-    test_pattern(p.pins.gpio11.into());
+    draw_screen(p.pins.gpio11.into());
 
     FreeRtos::delay_ms(400);
     log::info!("===== I2C scan (SDA=8 SCL=7) =====");
