@@ -155,6 +155,9 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           repo="${GITHUB_REPOSITORY#*/}"
+          # actions/checkout turns the tag it was triggered by into a lightweight ref (the commit),
+          # losing the annotation: fetch the real tag object to read its message.
+          git fetch --force --tags origin
           notes="$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")"
           min="$(grep -v '^#' release/min_ota_version.txt | head -n1 | tr -d '[:space:]')"
           python3 tools/make_release_site.py \
