@@ -1,0 +1,207 @@
+//! Speaker output: ES8311 codec (I2C control) + I2S (16 kHz stereo, MCLK = 256 x fs) + NS4150B amp.
+//!
+//! Sounds are pre-rendered at startup and played from a dedicated thread fed by a channel, so a
+//! blocking I2S write never stalls the sampling loop. Codec init is a port of Espressif's
+//! es8311.c for exactly one configuration (16 kHz, MCLK from the pin, 16-bit, slave).
+
+use std::sync::mpsc::{channel, Sender};
+
+use esp_idf_svc::hal::delay::{FreeRtos, BLOCK};
+use esp_idf_svc::hal::gpio::{AnyIOPin, AnyOutputPin, PinDriver};
+use esp_idf_svc::hal::i2c::I2cDriver;
+use esp_idf_svc::hal::i2s::config::{Config, DataBitWidth, SlotMode, StdClkConfig, StdConfig, StdGpioConfig, StdSlotConfig};
+use esp_idf_svc::hal::i2s::{I2s, I2sDriver, I2sTx};
+use esp_idf_svc::sys::EspError;
+
+const CODEC_ADDR: u8 = 0x18;
+const SAMPLE_RATE: u32 = 16_000;
+const VOLUME: u32 = 70; // 0..100, same as the C++ app
+
+#[derive(Clone, Copy, Debug)]
+pub enum Sound {
+    /// Backswing threshold crossing: short square-wave chirp.
+    Click,
+    /// Short lower-pitched UI confirm.
+    Tick,
+    /// Calibration cue.
+    Beep,
+}
+
+#[derive(Clone)]
+pub struct Audio {
+    tx: Sender<Sound>,
+}
+
+impl Audio {
+    /// Queue a sound; never blocks. Dropped if the audio thread is gone.
+    pub fn play(&self, s: Sound) {
+        let _ = self.tx.send(s);
+    }
+
+    pub fn start<'d, I: I2s + 'd>(
+        i2c: &mut I2cDriver,
+        i2s: I,
+        bclk: AnyIOPin<'d>,
+        dout: AnyIOPin<'d>,
+        mclk: AnyIOPin<'d>,
+        ws: AnyIOPin<'d>,
+        pa_ctrl: AnyOutputPin<'d>,
+    ) -> Result<Audio, EspError>
+    where
+        I: 'static,
+    {
+        // MCLK must be running before the codec is configured, so bring up I2S first.
+        // auto_clear: output zeros on underrun. Without it the channel keeps replaying its last DMA
+        // buffer once the data runs out, so every sound repeats forever.
+        let cfg = StdConfig::new(
+            Config::default().auto_clear(true),
+            StdClkConfig::from_sample_rate_hz(SAMPLE_RATE), // MCLK = 256 x fs
+            StdSlotConfig::philips_slot_default(DataBitWidth::Bits16, SlotMode::Stereo),
+            StdGpioConfig::default(),
+        );
+        let mut i2s = I2sDriver::<I2sTx>::new_std_tx(i2s, &cfg, bclk, dout, Some(mclk), ws)?;
+        i2s.tx_enable()?;
+        codec_init(i2c)?;
+
+        // Amp enable: the C++ app keeps it off except while sounds can play; here it just stays on.
+        let mut pa = PinDriver::output(pa_ctrl)?;
+        pa.set_high()?;
+        core::mem::forget(pa);
+        FreeRtos::delay_ms(10); // out of shutdown before the first sample
+
+        let click = render_chirp_square(50, 1500.0, 2500.0, 1.0);
+        let tick = render_tone(14, 1150.0, 0.6);
+        let mut beep = render_tone(110, 880.0, 0.5);
+        beep.extend(std::iter::repeat(0u8).take(frames_to_bytes(SAMPLE_RATE as usize * 60 / 1000))); // gap between beeps
+
+        let (tx, rx) = channel::<Sound>();
+        struct SendDriver(I2sDriver<'static, I2sTx>);
+        // The driver is only ever used from the audio thread.
+        unsafe impl Send for SendDriver {}
+        // SAFETY: lifetimes: all pins/peripherals passed in are 'static in practice (Peripherals::take).
+        let mut drv = SendDriver(unsafe { core::mem::transmute::<I2sDriver<'d, I2sTx>, I2sDriver<'static, I2sTx>>(i2s) });
+        std::thread::Builder::new().stack_size(6 * 1024).spawn(move || {
+            while let Ok(s) = rx.recv() {
+                let buf = match s {
+                    Sound::Click => &click,
+                    Sound::Tick => &tick,
+                    Sound::Beep => &beep,
+                };
+                if let Err(e) = drv.0.write_all(buf, BLOCK) {
+                    log::error!("i2s write: {e:?}");
+                }
+            }
+        }).unwrap();
+        Ok(Audio { tx })
+    }
+}
+
+fn frames_to_bytes(frames: usize) -> usize {
+    frames * 2 * 2 // stereo, 16-bit
+}
+
+fn clamp_i16(v: f32) -> i16 {
+    v.clamp(-32768.0, 32767.0) as i16
+}
+
+/// Raised-cosine attack/release envelope (2 ms), so a burst doesn't pop.
+fn envelope(i: usize, n: usize, ramp: usize) -> f32 {
+    use core::f32::consts::PI;
+    if i < ramp {
+        0.5 - 0.5 * (PI * i as f32 / ramp as f32).cos()
+    } else if i > n - ramp {
+        0.5 - 0.5 * (PI * (n - i) as f32 / ramp as f32).cos()
+    } else {
+        1.0
+    }
+}
+
+/// Mono sample -> interleaved stereo little-endian bytes.
+fn push_stereo(out: &mut Vec<u8>, s: i16) {
+    let b = s.to_le_bytes();
+    out.extend_from_slice(&b);
+    out.extend_from_slice(&b);
+}
+
+fn render_tone(ms: usize, hz: f32, amp: f32) -> Vec<u8> {
+    let n = SAMPLE_RATE as usize * ms / 1000;
+    let ramp = SAMPLE_RATE as usize * 2 / 1000;
+    let w = 2.0 * core::f32::consts::PI * hz / SAMPLE_RATE as f32;
+    let mut out = Vec::with_capacity(frames_to_bytes(n));
+    for i in 0..n {
+        push_stereo(&mut out, clamp_i16((w * i as f32).sin() * envelope(i, n, ramp) * amp * 32767.0));
+    }
+    out
+}
+
+/// Square wave swept linearly f0 -> f1. Phase is the integral of the instantaneous frequency:
+/// phase(t) = 2 pi (f0 t + (f1 - f0) t^2 / (2T)).
+fn render_chirp_square(ms: usize, f0: f32, f1: f32, amp: f32) -> Vec<u8> {
+    let n = SAMPLE_RATE as usize * ms / 1000;
+    let ramp = SAMPLE_RATE as usize * 2 / 1000;
+    let dur = n as f32 / SAMPLE_RATE as f32;
+    let mut out = Vec::with_capacity(frames_to_bytes(n));
+    for i in 0..n {
+        let t = i as f32 / SAMPLE_RATE as f32;
+        let phase = 2.0 * core::f32::consts::PI * (f0 * t + (f1 - f0) * t * t / (2.0 * dur));
+        let sq = if phase.sin() >= 0.0 { 1.0 } else { -1.0 };
+        push_stereo(&mut out, clamp_i16(sq * envelope(i, n, ramp) * amp * 32767.0));
+    }
+    out
+}
+
+fn wr(i2c: &mut I2cDriver, reg: u8, val: u8) -> Result<(), EspError> {
+    i2c.write(CODEC_ADDR, &[reg, val], BLOCK)
+}
+
+fn rd(i2c: &mut I2cDriver, reg: u8) -> Result<u8, EspError> {
+    let mut b = [0u8];
+    i2c.write_read(CODEC_ADDR, &[reg], &mut b, BLOCK)?;
+    Ok(b[0])
+}
+
+/// ES8311 init for 16 kHz, MCLK 4.096 MHz from the MCLK pin, 16-bit I2S, codec as slave
+/// (port of es8311_init + es8311_sample_frequency_config with the 4096000/16000 table row).
+fn codec_init(i2c: &mut I2cDriver) -> Result<(), EspError> {
+    // Reset, then power-on command.
+    wr(i2c, 0x00, 0x1F)?;
+    wr(i2c, 0x00, 0x00)?;
+    wr(i2c, 0x00, 0x80)?;
+
+    // Clocks: all enabled, MCLK from pin, not inverted; BCLK not inverted.
+    wr(i2c, 0x01, 0x3F)?;
+    let r06 = rd(i2c, 0x06)? & !(1 << 5);
+    wr(i2c, 0x06, r06)?;
+
+    // Dividers for 4.096 MHz / 16 kHz: pre_div 1, mult 1x, adc/dac div 1, single speed, OSR 0x10,
+    // BCLK div 4, LRCK divider 0x00ff.
+    let r02 = rd(i2c, 0x02)? & 0x07; // (pre_div-1)<<5 | pre_multi<<3 are both 0
+    wr(i2c, 0x02, r02)?;
+    wr(i2c, 0x03, 0x10)?;
+    wr(i2c, 0x04, 0x10)?;
+    wr(i2c, 0x05, 0x00)?;
+    let r06 = (rd(i2c, 0x06)? & 0xE0) | (4 - 1);
+    wr(i2c, 0x06, r06)?;
+    let r07 = rd(i2c, 0x07)? & 0xC0;
+    wr(i2c, 0x07, r07)?;
+    wr(i2c, 0x08, 0xFF)?;
+
+    // Serial port format: slave, I2S, 16-bit in and out.
+    let r00 = rd(i2c, 0x00)? & 0xBF;
+    wr(i2c, 0x00, r00)?;
+    wr(i2c, 0x09, 3 << 2)?;
+    wr(i2c, 0x0A, 3 << 2)?;
+
+    wr(i2c, 0x0D, 0x01)?; // power up analog
+    wr(i2c, 0x0E, 0x02)?; // enable analog PGA and ADC modulator
+    wr(i2c, 0x12, 0x00)?; // power up DAC
+    wr(i2c, 0x13, 0x10)?; // enable HP drive output
+    wr(i2c, 0x1C, 0x6A)?; // ADC equalizer bypass, cancel DC offset
+    wr(i2c, 0x37, 0x08)?; // bypass DAC equalizer
+
+    // Analog mic config (unused, kept identical to the C++ app) and output volume.
+    wr(i2c, 0x17, 0xC8)?;
+    wr(i2c, 0x14, 0x1A)?;
+    wr(i2c, 0x32, (VOLUME * 256 / 100 - 1) as u8)?;
+    Ok(())
+}

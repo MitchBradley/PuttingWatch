@@ -1,3 +1,4 @@
+mod audio;
 mod co5300;
 mod gfx;
 mod touch;
@@ -23,7 +24,7 @@ fn name_for(addr: u8) -> &'static str {
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle};
+use embedded_graphics::primitives::{PrimitiveStyle, Rectangle, RoundedRectangle};
 use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
 use u8g2_fonts::{fonts, FontRenderer};
 
@@ -202,6 +203,17 @@ fn main() {
         i2c.write(QMI8658_ADDR, &[reg, val], BLOCK).unwrap();
     }
 
+    let audio = audio::Audio::start(
+        &mut i2c,
+        p.i2s0,
+        p.pins.gpio20.into(),
+        p.pins.gpio23.into(),
+        p.pins.gpio19.into(),
+        p.pins.gpio22.into(),
+        p.pins.gpio6.into(),
+    )
+    .expect("audio init");
+
     let mut touch = touch::Touch::new(&mut i2c, p.pins.gpio10.into(), p.pins.gpio15.into());
     log::info!("touch ready; touch the screen");
 
@@ -252,9 +264,18 @@ fn main() {
             let sample = MotionSample { t_ms: now, gravity: filter.gravity(), rotation_rate: gyro_rps, accel };
             for e in tracker.update(&sample) {
                 match e {
-                    Event::Click => log::info!("CLICK #{}", tracker.click_count()),
-                    Event::CalibrationComplete => log::info!("calibrated"),
-                    Event::Ready => log::info!("READY"),
+                    Event::Click => {
+                        audio.play(audio::Sound::Click);
+                        log::info!("CLICK #{}", tracker.click_count())
+                    }
+                    Event::CalibrationComplete => {
+                        audio.play(audio::Sound::Beep);
+                        log::info!("calibrated")
+                    }
+                    Event::Ready => {
+                        audio.play(audio::Sound::Tick); // the C++ app speaks a voice cue here
+                        log::info!("READY")
+                    }
                     Event::SwingComplete(p) => {
                         last_peak = Some(p);
                         log::info!("swing complete, peak {p:.1} deg")
