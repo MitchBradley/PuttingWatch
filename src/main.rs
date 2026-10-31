@@ -1,5 +1,6 @@
 mod co5300;
 mod gfx;
+mod touch;
 
 use esp_idf_svc::hal::delay::{FreeRtos, BLOCK};
 use esp_idf_svc::hal::i2c::{I2cConfig, I2cDriver};
@@ -69,12 +70,13 @@ fn scene(t: &mut gfx::Strip) {
     text::<fonts::u8g2_font_helvR12_tf>(t, "v0.1.5  87%", 205, 25, Rgb565::CSS_GRAY);
 }
 
-fn draw_screen(rst: esp_idf_svc::hal::gpio::AnyOutputPin) {
+fn draw_screen(rst: esp_idf_svc::hal::gpio::AnyOutputPin) -> co5300::Co5300 {
     let mut buf = vec![0u8; co5300::WIDTH * gfx::STRIP_LINES * 2];
     let lcd = co5300::Co5300::new(rst, buf.len());
     let t0 = std::time::Instant::now();
     gfx::render(&lcd, &mut buf, scene);
     log::info!("full-screen render: {} ms", t0.elapsed().as_millis());
+    lcd
 }
 
 fn main() {
@@ -85,7 +87,7 @@ fn main() {
     let cfg = I2cConfig::new().baudrate(Hertz(400_000));
     let mut i2c = I2cDriver::new(p.i2c0, p.pins.gpio8, p.pins.gpio7, &cfg).unwrap();
 
-    draw_screen(p.pins.gpio11.into());
+    let lcd = draw_screen(p.pins.gpio11.into());
 
     FreeRtos::delay_ms(400);
     log::info!("===== I2C scan (SDA=8 SCL=7) =====");
@@ -109,17 +111,32 @@ fn main() {
         i2c.write(QMI8658_ADDR, &[reg, val], BLOCK).unwrap();
     }
 
+    let mut touch = touch::Touch::new(&mut i2c, p.pins.gpio10.into(), p.pins.gpio15.into());
+    log::info!("touch ready; touch the screen");
+
+    // 12x12 white dot, drawn straight to the panel at each touch report (even-aligned window).
+    let dot: Vec<u8> = [0xFFu8, 0xFF].repeat(12 * 12);
+    let mut tick = 0u32;
     loop {
-        // 12 bytes from AX_L (0x35): accel x,y,z then gyro x,y,z, little-endian i16.
-        let mut raw = [0u8; 12];
-        if i2c.write_read(QMI8658_ADDR, &[0x35], &mut raw, BLOCK).is_ok() {
-            let v = |i: usize| i16::from_le_bytes([raw[2 * i], raw[2 * i + 1]]) as f32;
-            log::info!(
-                "a[{:+.3} {:+.3} {:+.3}] g   w[{:+.1} {:+.1} {:+.1}] dps",
-                v(0) / 8192.0, v(1) / 8192.0, v(2) / 8192.0,
-                v(3) / 64.0, v(4) / 64.0, v(5) / 64.0,
-            );
+        if let Some((x, y)) = touch.read(&mut i2c) {
+            log::info!("touch x={x} y={y}");
+            let dx = ((x as i32 - 6).clamp(0, 398)) as u16 & !1;
+            let dy = ((y as i32 - 6).clamp(0, 490)) as u16 & !1;
+            lcd.blit(dx, dy, 12, 12, &dot);
         }
-        FreeRtos::delay_ms(200);
+        if tick % 100 == 0 {
+            // 12 bytes from AX_L (0x35): accel x,y,z then gyro x,y,z, little-endian i16.
+            let mut raw = [0u8; 12];
+            if i2c.write_read(QMI8658_ADDR, &[0x35], &mut raw, BLOCK).is_ok() {
+                let v = |i: usize| i16::from_le_bytes([raw[2 * i], raw[2 * i + 1]]) as f32;
+                log::info!(
+                    "a[{:+.3} {:+.3} {:+.3}] g   w[{:+.1} {:+.1} {:+.1}] dps",
+                    v(0) / 8192.0, v(1) / 8192.0, v(2) / 8192.0,
+                    v(3) / 64.0, v(4) / 64.0, v(5) / 64.0,
+                );
+            }
+        }
+        tick = tick.wrapping_add(1);
+        FreeRtos::delay_ms(10);
     }
 }
