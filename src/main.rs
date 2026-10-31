@@ -4,6 +4,7 @@ mod gfx;
 mod pmu;
 mod touch;
 mod ui;
+mod update_mode;
 mod voice_index;
 
 use std::sync::atomic::AtomicU8;
@@ -74,6 +75,11 @@ fn main() {
     let mut i2c = I2cDriver::new(p.i2c0, p.pins.gpio8, p.pins.gpio7, &cfg).unwrap();
 
     let lcd = co5300::Co5300::new(p.pins.gpio11.into(), co5300::WIDTH * gfx::STRIP_LINES * 2);
+
+    // Update mode is its own boot: no IMU, tracking or audio, so Wi-Fi and TLS get the RAM.
+    if update_mode::requested() {
+        update_mode::run(lcd, p.modem, p.pins.gpio9.into());
+    }
 
     FreeRtos::delay_ms(400);
     log::info!("I2C devices (SDA=8 SCL=7):");
@@ -215,7 +221,7 @@ fn main() {
                 panel = Panel::On;
                 ignore_touch_until = now.wrapping_add(WAKE_SWALLOW_MS);
                 last_tap_ms = now;
-            } else if bye_until.is_none() {
+            } else {
                 last_tap_ms = now;
                 last_touch_ms = now;
                 if !touching {
@@ -225,6 +231,12 @@ fn main() {
                             pressed = Some(b);
                             match b {
                                 Btn::Recal => tracker.recal(),
+                                Btn::Update => {
+                                    // Let "Starting..." reach the screen, then restart into update mode.
+                                    ui_state.lock().unwrap().pressed = pressed;
+                                    FreeRtos::delay_ms(400);
+                                    update_mode::request_and_restart();
+                                }
                                 Btn::Stop => {
                                     bye_until = Some(now.wrapping_add(BYE_MS));
                                     ignore_touch_until = now.wrapping_add(500);

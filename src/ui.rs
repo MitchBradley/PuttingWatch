@@ -36,6 +36,8 @@ pub enum Btn {
     Stop,
     Minus,
     Plus,
+    /// Bye screen: restart into update mode.
+    Update,
 }
 
 /// What the panel itself is doing, independent of what is drawn on it.
@@ -86,18 +88,21 @@ fn btn_rect(b: Btn) -> R {
         Btn::Stop => ((W - 150) / 2 + 88, 12, 150, 82),
         Btn::Minus => ((W - 140) / 2 - 88, H - 104 - 16, 140, 104),
         Btn::Plus => ((W - 140) / 2 + 88, H - 104 - 16, 140, 104),
+        Btn::Update => ((W - 240) / 2, (H - 76) / 2 + 110, 240, 76),
     }
 }
 
 /// A fingertip landing this far outside a button still presses it.
 const HIT_MARGIN: i32 = 24;
 
-/// Which button, if any, a touch at (x, y) lands on. Only the Run screen has buttons.
+/// Which button, if any, a touch at (x, y) lands on. Only the Run and Bye screens have buttons.
 pub fn hit(screen: Screen, x: i32, y: i32) -> Option<Btn> {
-    if screen != Screen::Run {
-        return None;
-    }
-    [Btn::Recal, Btn::Stop, Btn::Minus, Btn::Plus].into_iter().find(|&b| {
+    let buttons: &[Btn] = match screen {
+        Screen::Run => &[Btn::Recal, Btn::Stop, Btn::Minus, Btn::Plus],
+        Screen::Bye => &[Btn::Update],
+        _ => return None,
+    };
+    buttons.iter().copied().find(|&b| {
         let (bx, by, bw, bh) = btn_rect(b);
         x >= bx - HIT_MARGIN && x < bx + bw + HIT_MARGIN && y >= by - HIT_MARGIN && y < by + bh + HIT_MARGIN
     })
@@ -126,6 +131,8 @@ const BG_IDLE: u32 = 0x000000;
 const BG_READY: u32 = 0x005A0D;
 const BTN_BLUE: u32 = 0x2196F3;
 const BTN_BLUE_PRESSED: u32 = 0x1565C0;
+const BTN_GREY: u32 = 0x3A3A3A; // Bye-screen buttons
+const BTN_GREEN: u32 = 0x1B7F3B; // ...while touched
 
 // --- drawing ----------------------------------------------------------------------------------
 
@@ -147,7 +154,13 @@ fn pill(t: &mut Strip, x: i32, y: i32, w: i32, h: i32, c: Rgb565) {
 
 fn button(t: &mut Strip, b: Btn, s: &UiState) {
     let (x, y, w, h) = btn_rect(b);
-    let colour = if s.pressed == Some(b) { BTN_BLUE_PRESSED } else { BTN_BLUE };
+    let pressed = s.pressed == Some(b);
+    let colour = match (b, pressed) {
+        (Btn::Update, false) => BTN_GREY,
+        (Btn::Update, true) => BTN_GREEN,
+        (_, false) => BTN_BLUE,
+        (_, true) => BTN_BLUE_PRESSED,
+    };
     let _ = RoundedRectangle::with_equal_corners(Rectangle::new(Point::new(x, y), Size::new(w as u32, h as u32)), Size::new(18, 18))
         .into_styled(PrimitiveStyle::with_fill(rgb(colour)))
         .draw(t);
@@ -157,6 +170,8 @@ fn button(t: &mut Strip, b: Btn, s: &UiState) {
         Btn::Stop => text_c::<fonts::u8g2_font_logisoso22_tf>(t, "Stop", cx, cy, Rgb565::WHITE),
         Btn::Minus => text_c::<fonts::u8g2_font_logisoso34_tf>(t, "-", cx, cy, Rgb565::WHITE),
         Btn::Plus => text_c::<fonts::u8g2_font_logisoso34_tf>(t, "+", cx, cy, Rgb565::WHITE),
+        // Restarting into update mode takes a moment: say so on the button itself.
+        Btn::Update => text_c::<fonts::u8g2_font_logisoso24_tf>(t, if pressed { "Starting..." } else { "Update" }, cx, cy, Rgb565::WHITE),
     }
 }
 
@@ -216,7 +231,10 @@ fn scene(t: &mut Strip, s: &UiState) {
             button(t, Btn::Minus, s);
             button(t, Btn::Plus, s);
         }
-        Screen::Bye => text_c::<fonts::u8g2_font_logisoso34_tf>(t, "Bye", W / 2, H / 2, Rgb565::WHITE),
+        Screen::Bye => {
+            text_c::<fonts::u8g2_font_logisoso34_tf>(t, "Bye", W / 2, H / 2, Rgb565::WHITE);
+            button(t, Btn::Update, s);
+        }
     }
 }
 
@@ -243,6 +261,10 @@ fn dirty_bands(prev: Option<&UiState>, cur: &UiState) -> Vec<(usize, usize)> {
     let mut v = Vec::new();
     if top_pressed(p) != top_pressed(cur) || p.batt_pct != cur.batt_pct || p.batt_mv != cur.batt_mv {
         v.push(TOP);
+    }
+    if cur.screen == Screen::Bye && p.pressed != cur.pressed {
+        v.push(MID); // the Update button straddles both bands
+        v.push(BOT);
     }
     if cur.screen == Screen::Run {
         if p.angle10 != cur.angle10 || p.level != cur.level {
