@@ -32,8 +32,6 @@ const VOLUME: u32 = 70; // 0..100, same as the C++ app
 pub enum Sound {
     /// Backswing threshold crossing: short square-wave chirp.
     Click,
-    /// Short lower-pitched UI confirm.
-    Tick,
     /// Calibration cue.
     Beep,
     /// Spoken "ready": armed for the next stroke.
@@ -116,12 +114,11 @@ impl Audio {
             while let Ok(s) = rx.recv() {
                 let res = match s {
                     Sound::Click => drv.0.write_all(&click, BLOCK),
-                    Sound::Tick => drv.0.write_all(&tick, BLOCK),
                     Sound::Beep => drv.0.write_all(&beep, BLOCK),
                     Sound::Ready => stream_voice(&mut drv.0, crate::voice_index::READY, READY_GAIN),
                     Sound::Number(n) => match crate::voice_index::NUMBERS.get(n as usize) {
                         Some(&(off, len)) if len > 0 => stream_voice(&mut drv.0, (off, len), 1.0),
-                        _ => drv.0.write_all(&tick, BLOCK), // no sample compiled in
+                        _ => drv.0.write_all(&tick, BLOCK), // no sample compiled in: a short low tick instead
                     },
                 };
                 if let Err(e) = res {

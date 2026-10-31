@@ -28,9 +28,7 @@ crash_on_boot = []
 
 [dependencies]
 log = "0.4"
-esp-idf-svc = { version = "0.53", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
-# Remove `generic-queue-8` if you plan to use `embassy-time` WITH `embassy-executor`
-embassy-time = { version = "0.5", features = ["generic-queue-8"] }
+esp-idf-svc = { version = "0.53", features = ["critical-section"] }
 embedded-graphics = "0.8"
 u8g2-fonts = { version = "0.8", features = ["embedded_graphics_textstyle"] }
 putting-core = { version = "0.1.0", path = "crates/putting-core" }
