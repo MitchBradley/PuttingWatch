@@ -9,7 +9,7 @@
 //! manifest, then switch the boot slot and restart. The running firmware is only replaced when the
 //! very last step (`complete`) succeeds, so cancelling at any moment by restarting is safe.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -28,7 +28,7 @@ use esp_idf_svc::http::Method;
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs};
 use esp_idf_svc::ota::EspOta;
 use esp_idf_svc::sntp::{EspSntp, SyncStatus};
-use esp_idf_svc::wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi};
+use esp_idf_svc::wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi, WifiEvent};
 use putting_core::update::{battery_allows_update, decide, parse_manifest, Decision, Manifest, ManifestError};
 use sha2::{Digest, Sha256};
 use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
@@ -36,6 +36,7 @@ use u8g2_fonts::{fonts, FontRenderer};
 
 use crate::co5300::Co5300;
 use crate::gfx::{self, Strip};
+use crate::provision;
 
 /// Where the watch looks for updates. Must match where the release workflow publishes.
 const SITE_URL: &str = match option_env!("OTA_SITE_URL") {
@@ -45,6 +46,7 @@ const SITE_URL: &str = match option_env!("OTA_SITE_URL") {
 const RUNNING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+const JOIN_TIMEOUT: Duration = Duration::from_secs(20);
 const STALL_LIMIT: Duration = Duration::from_secs(15); // no download bytes for this long = stalled
 const TOUCH_RELEASE_MS: u32 = 120;
 const HIT_MARGIN: i32 = 24;
@@ -81,6 +83,7 @@ pub fn requested() -> bool {
 enum Cmd {
     Install,
     Retry,
+    ChangeWifi,
 }
 
 #[derive(Clone, PartialEq, Default)]
@@ -89,10 +92,14 @@ struct View {
     lines: Vec<String>,
     /// One big button under the text, if any.
     button: Option<(&'static str, Cmd)>,
+    /// A smaller text link below it, if any.
+    link: Option<(&'static str, Cmd)>,
 }
 
 /// (x, y, w, h) of the one button.
 const BUTTON: (i32, i32, i32, i32) = (55, 400, 300, 64);
+/// (x, y, w, h) of the link under it.
+const LINK: (i32, i32, i32, i32) = (85, 468, 240, 40);
 
 /// Greedy word wrap to `width` characters.
 fn wrap(s: &str, width: usize) -> Vec<String> {
@@ -122,6 +129,10 @@ fn draw_view(t: &mut Strip, v: &View) {
     let body = FontRenderer::new::<fonts::u8g2_font_helvR18_tf>();
     for (i, l) in v.lines.iter().take(7).enumerate() {
         centred(t, &body, l, 150 + 36 * i as i32, Rgb565::CSS_LIGHT_GRAY);
+    }
+    if let Some((label, _)) = v.link {
+        let (_, y, _, h) = LINK;
+        centred(t, &FontRenderer::new::<fonts::u8g2_font_helvR18_tf>(), label, y + h / 2, Rgb565::new(0x64 >> 3, 0xB5 >> 2, 0xF6 >> 3));
     }
     if let Some((label, _)) = v.button {
         let (x, y, w, h) = BUTTON;
@@ -154,12 +165,18 @@ struct Power {
 }
 
 fn show(view: &Mutex<View>, title: &str, lines: Vec<String>, button: Option<(&'static str, Cmd)>) {
-    log::info!("[update] {title}: {}", lines.join(" | "));
-    *view.lock().unwrap() = View { title: title.into(), lines, button };
+    show_with_link(view, title, lines, button, None);
 }
 
+fn show_with_link(view: &Mutex<View>, title: &str, lines: Vec<String>, button: Option<(&'static str, Cmd)>, link: Option<(&'static str, Cmd)>) {
+    log::info!("[update] {title}: {}", lines.join(" | "));
+    *view.lock().unwrap() = View { title: title.into(), lines, button, link };
+}
+
+const CHANGE_WIFI: Option<(&str, Cmd)> = Some(("Change Wi-Fi", Cmd::ChangeWifi));
+
 fn fail(view: &Mutex<View>, msg: &str) {
-    show(view, "Problem", wrap(msg, 30), Some(("Try again", Cmd::Retry)));
+    show_with_link(view, "Problem", wrap(msg, 30), Some(("Try again", Cmd::Retry)), CHANGE_WIFI);
 }
 
 fn load_creds(nvs: &EspDefaultNvsPartition) -> Option<(String, String)> {
@@ -191,11 +208,20 @@ fn credentials(nvs: &EspDefaultNvsPartition) -> Option<(String, String)> {
 
 type Wifi = BlockingWifi<EspWifi<'static>>;
 
-/// Join (or re-join) the network.
-fn ensure_connected(view: &Mutex<View>, wifi: &mut Wifi, ssid: &str, pass: &str) -> Result<(), String> {
-    if wifi.is_connected().unwrap_or(false) && wifi.is_up().unwrap_or(false) {
-        return Ok(());
+/// Why a join failed, in the words shown on the setup screen.
+fn describe_join_failure(reason: u16, ssid: &str) -> String {
+    match reason {
+        // NO_AP_FOUND (and its compatible-security variants)
+        201 | 210..=213 => format!("Couldn't find \"{ssid}\"."),
+        // AUTH_EXPIRE, 4WAY_HANDSHAKE_TIMEOUT, MIC_FAILURE, AUTH_FAIL, HANDSHAKE_TIMEOUT, ...
+        2 | 14 | 15 | 16 | 202 | 204 | 205 => format!("Couldn't join \"{ssid}\". Wrong password?"),
+        _ => format!("Couldn't connect to \"{ssid}\"."),
     }
+}
+
+/// Join a network: one attempt with a bounded wait, classifying the failure from the driver's
+/// disconnect reason (`why`, filled in by an event subscription).
+fn join(view: &Mutex<View>, wifi: &mut Wifi, why: &AtomicU16, ssid: &str, pass: &str) -> Result<(), String> {
     show(view, "Wi-Fi", vec!["Joining".into(), ssid.to_string()], None);
     let cfg = Configuration::Client(ClientConfiguration {
         ssid: ssid.try_into().map_err(|_| "That network name is too long.".to_string())?,
@@ -203,9 +229,30 @@ fn ensure_connected(view: &Mutex<View>, wifi: &mut Wifi, ssid: &str, pass: &str)
         auth_method: if pass.is_empty() { AuthMethod::None } else { AuthMethod::WPA2Personal },
         ..Default::default()
     });
+    let _ = wifi.wifi_mut().disconnect();
+    let _ = wifi.stop();
     wifi.set_configuration(&cfg).map_err(|e| format!("Wi-Fi setup failed: {e}"))?;
     wifi.start().map_err(|e| format!("Wi-Fi start failed: {e}"))?;
-    wifi.connect().map_err(|e| format!("Couldn't join \"{ssid}\": {e}"))?;
+    why.store(0, Ordering::Relaxed);
+    wifi.wifi_mut().connect().map_err(|e| format!("Couldn't join \"{ssid}\": {e}"))?;
+
+    let t0 = Instant::now();
+    loop {
+        if wifi.is_connected().unwrap_or(false) {
+            break;
+        }
+        let reason = why.load(Ordering::Relaxed);
+        if reason != 0 {
+            log::warn!("[update] join failed, disconnect reason {reason}");
+            let _ = wifi.wifi_mut().disconnect();
+            return Err(describe_join_failure(reason, ssid));
+        }
+        if t0.elapsed() > JOIN_TIMEOUT {
+            let _ = wifi.wifi_mut().disconnect();
+            return Err(format!("Couldn't connect to \"{ssid}\"."));
+        }
+        FreeRtos::delay_ms(100);
+    }
     wifi.wait_netif_up().map_err(|e| format!("Joined \"{ssid}\" but got no address: {e}"))?;
     if let Ok(ip) = wifi.wifi().sta_netif().get_ip_info() {
         log::info!("[update] joined, ip {}", ip.ip);
@@ -349,11 +396,11 @@ fn download(view: &Mutex<View>, power: &Power, m: &Manifest) -> Result<(), Strin
     unsafe { esp_idf_svc::sys::esp_restart() };
 }
 
-/// Block until the button for `want` is pressed.
-fn wait_for(rx: &Receiver<Cmd>, want: Cmd) {
+/// Block until one of `want` is pressed; returns which.
+fn wait_for(rx: &Receiver<Cmd>, want: &[Cmd]) -> Cmd {
     while let Ok(c) = rx.recv() {
-        if c == want {
-            return;
+        if want.contains(&c) {
+            return c;
         }
     }
     loop {
@@ -361,57 +408,146 @@ fn wait_for(rx: &Receiver<Cmd>, want: Cmd) {
     }
 }
 
+/// The setup screen's text. `note` says why the previous attempt failed, if it did.
+fn show_provisioning(view: &Mutex<View>, st: provision::Status, note: &str) {
+    match st {
+        provision::Status::Scanning => show(view, "Wi-Fi", vec!["Looking for networks...".into()], None),
+        provision::Status::Waiting { ap_ssid, ap_pass, ip, phone_joined } => {
+            let mut lines = if note.is_empty() { vec![] } else { wrap(note, 30) };
+            if phone_joined {
+                lines.extend(["Now open this page".to_string(), format!("http://{ip}/"), "in your phone's browser".to_string()]);
+            } else {
+                lines.extend(["On your phone, join".to_string(), ap_ssid.to_string(), format!("password {ap_pass}")]);
+            }
+            show(view, "Wi-Fi setup", lines, None);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Next {
+    Connect,
+    Provision,
+    Check,
+}
+
 fn engine(view: Arc<Mutex<View>>, power: Arc<Power>, rx: Receiver<Cmd>, modem: Modem<'static>, sysloop: EspSystemEventLoop, nvs: EspDefaultNvsPartition) {
-    let Some((ssid, pass)) = credentials(&nvs) else {
-        show(&view, "Wi-Fi", wrap("No Wi-Fi network is saved yet. Setting one up from the watch isn't done yet.", 30), None);
-        return;
-    };
     // No NVS handed to the driver: it would keep its own copy of the credentials.
     let esp = match EspWifi::new(modem, sysloop.clone(), None) {
         Ok(e) => e,
         Err(e) => return fail(&view, &format!("Wi-Fi init failed: {e}")),
+    };
+    // The driver's disconnect reasons tell "wrong password" from "no such network".
+    let why = Arc::new(AtomicU16::new(0));
+    let _subscription = {
+        let why = why.clone();
+        sysloop.subscribe::<WifiEvent, _>(move |e| {
+            if let WifiEvent::StaDisconnected(d) = e {
+                why.store(d.reason(), Ordering::Relaxed);
+            }
+        })
     };
     let mut wifi = match BlockingWifi::wrap(esp, sysloop) {
         Ok(w) => w,
         Err(e) => return fail(&view, &format!("Wi-Fi init failed: {e}")),
     };
     let mut sntp: Option<EspSntp<'static>> = None;
+    let mut note = String::new(); // why the last join failed, shown on the setup screen
+    let mut next = Next::Connect;
 
     loop {
-        let result = ensure_connected(&view, &mut wifi, &ssid, &pass)
-            .and_then(|_| {
-                show(&view, "Checking", vec!["Setting the clock...".into()], None);
-                sync_clock(&mut sntp)
-            })
-            .and_then(|_| check(&view));
+        next = match next {
+            Next::Connect => match credentials(&nvs) {
+                None => {
+                    note.clear();
+                    Next::Provision
+                }
+                Some((ssid, pass)) => match join(&view, &mut wifi, &why, &ssid, &pass) {
+                    Ok(()) => Next::Check,
+                    Err(e) => {
+                        note = e;
+                        Next::Provision
+                    }
+                },
+            },
 
-        match result {
-            Ok((Decision::UpToDate, _)) => {
-                show(&view, "Up to date", vec![format!("v{RUNNING_VERSION}")], Some(("Check again", Cmd::Retry)));
-                wait_for(&rx, Cmd::Retry);
-            }
-            Ok((Decision::NeedsUsbInstall, _)) => {
-                show(&view, "USB update", wrap("A newer version needs a USB cable to install.", 30), None);
-                return;
-            }
-            Ok((Decision::Available, m)) => {
-                let mut lines = vec![format!("v{} is available", m.version)];
-                lines.extend(wrap(&m.notes, 30));
-                show(&view, "Update", lines, Some(("Install", Cmd::Install)));
-                wait_for(&rx, Cmd::Install);
-                match download(&view, &power, &m) {
-                    Ok(()) => {}
+            Next::Provision => match provision::run(&mut wifi, |st| show_provisioning(&view, st, &note)) {
+                Ok((ssid, pass)) => match join(&view, &mut wifi, &why, &ssid, &pass) {
+                    Ok(()) => {
+                        save_creds(&nvs, &ssid, &pass);
+                        note.clear();
+                        Next::Check
+                    }
+                    Err(e) => {
+                        note = e; // back to a fresh setup screen, with the reason shown
+                        Next::Provision
+                    }
+                },
+                Err(e) => {
+                    fail(&view, &e);
+                    match wait_for(&rx, &[Cmd::Retry, Cmd::ChangeWifi]) {
+                        Cmd::ChangeWifi => Next::Provision,
+                        _ => Next::Connect,
+                    }
+                }
+            },
+
+            Next::Check => {
+                show(&view, "Checking", vec!["Setting the clock...".into()], None);
+                match sync_clock(&mut sntp).and_then(|_| check(&view)) {
+                    Ok((Decision::UpToDate, _)) => {
+                        show_with_link(&view, "Up to date", vec![format!("v{RUNNING_VERSION}")], Some(("Check again", Cmd::Retry)), CHANGE_WIFI);
+                        match wait_for(&rx, &[Cmd::Retry, Cmd::ChangeWifi]) {
+                            Cmd::ChangeWifi => {
+                                note.clear();
+                                Next::Provision
+                            }
+                            _ => Next::Connect,
+                        }
+                    }
+                    Ok((Decision::NeedsUsbInstall, _)) => {
+                        show_with_link(&view, "USB update", wrap("A newer version needs a USB cable to install.", 30), None, CHANGE_WIFI);
+                        wait_for(&rx, &[Cmd::ChangeWifi]);
+                        note.clear();
+                        Next::Provision
+                    }
+                    Ok((Decision::Available, m)) => {
+                        let mut lines = vec![format!("v{} is available", m.version)];
+                        lines.extend(wrap(&m.notes, 30));
+                        show_with_link(&view, "Update", lines, Some(("Install", Cmd::Install)), CHANGE_WIFI);
+                        match wait_for(&rx, &[Cmd::Install, Cmd::ChangeWifi]) {
+                            Cmd::Install => match download(&view, &power, &m) {
+                                Ok(()) => Next::Check,
+                                Err(e) => {
+                                    fail(&view, &e);
+                                    match wait_for(&rx, &[Cmd::Retry, Cmd::ChangeWifi]) {
+                                        Cmd::ChangeWifi => {
+                                            note.clear();
+                                            Next::Provision
+                                        }
+                                        _ => Next::Connect,
+                                    }
+                                }
+                            },
+                            _ => {
+                                note.clear();
+                                Next::Provision
+                            }
+                        }
+                    }
                     Err(e) => {
                         fail(&view, &e);
-                        wait_for(&rx, Cmd::Retry);
+                        match wait_for(&rx, &[Cmd::Retry, Cmd::ChangeWifi]) {
+                            Cmd::ChangeWifi => {
+                                note.clear();
+                                Next::Provision
+                            }
+                            _ => Next::Connect,
+                        }
                     }
                 }
             }
-            Err(e) => {
-                fail(&view, &e);
-                wait_for(&rx, Cmd::Retry);
-            }
-        }
+        };
     }
 }
 
@@ -425,7 +561,7 @@ pub fn run(
     touch_int: AnyIOPin<'static>,
 ) -> ! {
     log::info!("UPDATE MODE (site {SITE_URL}, running {RUNNING_VERSION})");
-    let view = Arc::new(Mutex::new(View { title: "Update".into(), lines: vec!["Starting...".into()], button: None }));
+    let view = Arc::new(Mutex::new(View { title: "Update".into(), lines: vec!["Starting...".into()], button: None, link: None }));
 
     // A redraw takes ~100+ ms of CPU; keep it below the engine so it can't slow the download.
     let _ = ThreadSpawnConfiguration { name: Some(c"display"), stack_size: 16 * 1024, priority: 2, ..Default::default() }.set();
@@ -469,13 +605,18 @@ pub fn run(
             last_touch = Instant::now();
             if !touching {
                 touching = true;
-                let button = view.lock().unwrap().button;
-                if let Some((_, cmd)) = button {
-                    let (bx, by, bw, bh) = BUTTON;
-                    let (x, y) = (x as i32, y as i32);
-                    if x >= bx - HIT_MARGIN && x < bx + bw + HIT_MARGIN && y >= by - HIT_MARGIN && y < by + bh + HIT_MARGIN {
-                        let _ = tx.send(cmd);
-                    }
+                let (button, link) = {
+                    let v = view.lock().unwrap();
+                    (v.button, v.link)
+                };
+                let (x, y) = (x as i32, y as i32);
+                let hits = |(bx, by, bw, bh): (i32, i32, i32, i32)| {
+                    x >= bx - HIT_MARGIN && x < bx + bw + HIT_MARGIN && y >= by - HIT_MARGIN && y < by + bh + HIT_MARGIN
+                };
+                if let Some((_, cmd)) = button.filter(|_| hits(BUTTON)) {
+                    let _ = tx.send(cmd);
+                } else if let Some((_, cmd)) = link.filter(|_| hits(LINK)) {
+                    let _ = tx.send(cmd);
                 }
             }
         }

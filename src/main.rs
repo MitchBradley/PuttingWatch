@@ -2,6 +2,7 @@ mod audio;
 mod co5300;
 mod gfx;
 mod pmu;
+mod provision;
 mod touch;
 mod ui;
 mod update_mode;

@@ -2,6 +2,7 @@
 //! No ESP or I/O dependencies, so it builds and tests on the host.
 
 mod gravity;
+pub mod portal;
 mod swing;
 pub mod update;
 mod vec3;
