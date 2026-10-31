@@ -21,6 +21,11 @@ esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf.git" }
 esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf.git" }
 esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf.git" }
 
+[features]
+# Builds an image that panics at the very start of main, before the OTA self-check confirms it.
+# Used to test that the bootloader rolls a bad update back on its own. Never ship it as a release.
+crash_on_boot = []
+
 [dependencies]
 log = "0.4"
 esp-idf-svc = { version = "0.53", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }

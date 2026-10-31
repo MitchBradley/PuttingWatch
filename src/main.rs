@@ -69,6 +69,11 @@ fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
+    // Rollback test image: crash before anything can confirm this image as good (see Cargo.toml).
+    if cfg!(feature = "crash_on_boot") {
+        panic!("crash_on_boot: deliberate crash for the OTA rollback test");
+    }
+
     // The sampling loop (this task) must preempt the display thread: a screen redraw takes
     // tens of ms of CPU on this single core and would otherwise stall IMU sampling.
     unsafe { esp_idf_svc::sys::vTaskPrioritySet(core::ptr::null_mut(), 6) };
