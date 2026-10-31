@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "version": "0.1.6-rust.2",
+  "version": "0.2.0",
   "min_version": "0.0.0",
-  "released": "2026-10-31T21:52:30Z",
-  "url": "https://mitchbradley.github.io/PuttingWatch/firmware/0.1.6-rust.2/firmware.bin",
-  "size": 2699120,
-  "sha256": "e676be0e2ec0a55cf7ec8912deafa1bc159698a4d8f74a996c8f176d0ce78579",
-  "notes": "Take the firmware's version from git, so a release is just a tag"
+  "released": "2026-10-31T22:45:44Z",
+  "url": "https://mitchbradley.github.io/PuttingWatch/firmware/0.2.0/firmware.bin",
+  "size": 2699104,
+  "sha256": "ee4f8c007ecf5abd255349973a76ceb4088b728bbc4d8a22cad8aefc4a725d5a",
+  "notes": "Rewritten in Rust; same features as before"
 }
