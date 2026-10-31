@@ -3,6 +3,7 @@
 
 mod gravity;
 mod swing;
+pub mod update;
 mod vec3;
 
 pub use gravity::GravityFilter;
