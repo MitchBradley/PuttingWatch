@@ -1,0 +1,196 @@
+name: Release
+
+# Push a tag like v0.1.6 (or v0.2.0-beta.1) to build, test and publish:
+#   - a GitHub Release with the firmware images attached (permanent archive)
+#   - the website, on the gh-pages branch (served by GitHub Pages): USB install
+#     page + manifest.json for over-the-air updates (holds only the newest
+#     release) + the user guide
+# The tag must match `version` in Cargo.toml: the firmware reports that as its
+# own version, and the updater compares it with the manifest.
+#
+# A push to main (or rust), or "Run workflow" from the Actions tab, does the
+# build and tests only - handy for checking CI works before tagging; nothing is
+# published.
+
+on:
+  push:
+    branches: [main, rust]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag format
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          re='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+          if ! [[ "$GITHUB_REF_NAME" =~ $re ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' must look like v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+
+      # ESP-IDF's installer needs a venv-capable Python; espflash needs libudev.
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-venv libudev-dev pkg-config
+
+      # The nightly (and rust-src, for build-std) is pinned by rust-toolchain.toml.
+      - name: Rust toolchain
+        run: |
+          # rustup >= 1.28 installs the pinned toolchain with a bare `toolchain install`; older ones on `show`.
+          rustup toolchain install 2>/dev/null || rustup show
+          rustc --version
+
+      - name: Cache cargo tools
+        id: tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-tools-${{ runner.os }}-espflash-ldproxy-v1
+
+      - name: Install ldproxy and espflash
+        if: steps.tools.outputs.cache-hit != 'true'
+        run: cargo install --locked ldproxy espflash
+
+      # ESP-IDF itself (cloned and built by esp-idf-sys): several GB, so cache it.
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        with:
+          path: .embuild
+          key: embuild-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'sdkconfig.defaults', '.cargo/config.toml', 'Cargo.lock') }}
+          restore-keys: embuild-${{ runner.os }}-
+
+      - uses: Swatinem/rust-cache@v2
+
+      # putting-core is plain Rust with no ESP dependencies: its tests run on the runner.
+      - name: Unit tests
+        working-directory: crates/putting-core
+        run: cargo test --target x86_64-unknown-linux-gnu
+
+      # No WIFI_SSID / WIFI_PASS here, on purpose: a release must not contain credentials.
+      - name: Build firmware
+        run: cargo build --release
+
+      - name: Check the built version matches the tag
+        id: ver
+        run: |
+          built=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n1)
+          echo "firmware reports: $built"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            expected="${GITHUB_REF_NAME#v}"
+            if [[ "$built" != "$expected" ]]; then
+              echo "::error::Cargo.toml says '$built' but the tag says '$expected'"
+              exit 1
+            fi
+          fi
+          echo "version=$built" >> "$GITHUB_OUTPUT"
+
+      # The OTA file is a bare app image; the USB installer wants one merged with the
+      # bootloader and partition table. Both use the IDF-built bootloader.
+      - name: Make the images
+        run: |
+          bl=$(ls -t target/riscv32imac-esp-espidf/release/build/esp-idf-sys/*/out/build/bootloader/bootloader.bin | head -n1)
+          elf=target/riscv32imac-esp-espidf/release/putting-watch-rs
+          mkdir -p dist
+          common=(--chip esp32c6 --flash-size 16mb --partition-table partitions.csv --bootloader "$bl")
+          espflash save-image "${common[@]}" "$elf" dist/firmware.bin
+          espflash save-image "${common[@]}" --merge "$elf" dist/firmware.factory.bin
+          ls -l dist
+          # Each OTA slot is 5 MiB (partitions.csv): an image that doesn't fit can't be installed.
+          size=$(stat -c %s dist/firmware.bin)
+          if (( size > 5242880 )); then
+            echo "::error::firmware.bin is $size bytes, larger than the 5 MiB OTA slot"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: dist/*.bin
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the GitHub Release, push gh-pages
+    # Shared with docs.yml so the two never push gh-pages at the same moment.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tag message is the release summary
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: dist
+
+      - name: Assemble site
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          notes="$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")"
+          min="$(grep -v '^#' release/min_ota_version.txt | head -n1 | tr -d '[:space:]')"
+          python3 tools/make_release_site.py \
+            --version "$VERSION" \
+            --min-version "$min" \
+            --base-url "https://${owner}.github.io/${repo}/" \
+            --repo-url "https://github.com/${GITHUB_REPOSITORY}" \
+            --firmware dist/firmware.bin \
+            --factory dist/firmware.factory.bin \
+            --template release/index.template.html \
+            --notes "$notes" \
+            --out site
+          cat site/manifest.json
+
+      # Release before the site: the site is what makes the update visible to
+      # watches, so it goes last - a failure above never reaches a device.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp dist/firmware.bin "firmware-${VERSION}.bin"
+          cp dist/firmware.factory.bin "firmware-${VERSION}.factory.bin"
+          flags=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" \
+            --title "Honu Watch ${VERSION}" --generate-notes \
+            "firmware-${VERSION}.bin" "firmware-${VERSION}.factory.bin"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages
+
+      # The branch holds exactly the newest release's site, so older firmware
+      # folders disappear (the Release assets keep every version).
+      - name: Publish the site
+        run: |
+          rsync -a --delete --exclude=.git --exclude=.nojekyll site/ pages/
+          touch pages/.nojekyll
+          cd pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Release ${VERSION}"
+          for i in 1 2 3; do
+            git push && exit 0
+            git pull --rebase
+          done
+          echo "::error::could not push gh-pages"
+          exit 1

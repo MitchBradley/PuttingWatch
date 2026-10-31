@@ -41,8 +41,10 @@ cargo install espflash ldproxy
 ```
 
 `rust-toolchain.toml` pins a **nightly** (the `riscv32imac-esp-espidf` target is tier 3, so std is built from
-source with `build-std`). The first build clones and builds ESP-IDF v5.5.3 into `.embuild/` (about 650 MB and
-several minutes).
+source with `build-std`). The first build clones and builds ESP-IDF v5.5.3 into `.embuild/` — **about 5 GB**
+(the IDF tree, the RISC-V toolchain and a Python environment) and several minutes — and the build output in
+`target/` is another 3 GB or so. Keep the checkout somewhere iCloud doesn't sync (not `~/Documents`): evicted
+files make builds and git fail in confusing ways (`mmap failed: Operation canceled`).
 
 Two environment gotchas:
 
@@ -118,8 +120,17 @@ namespace (`wifi`) the C++ updater uses, so they survive a switch between the tw
 
 ## Releasing
 
-Releases go to the same GitHub Pages site as the C++ ones; only `manifest.json` and
-`firmware/<version>/firmware.bin` need to change.
+**CI does it.** Push a tag `vX.Y.Z` (or `vX.Y.Z-beta.1`) whose version equals `version` in `Cargo.toml`
+(the firmware reports that as its running version, and the workflow refuses a mismatch). The Release workflow
+(`.github/workflows/release.yml`) runs the host tests, builds with no Wi-Fi credentials, makes the images, checks
+the app image fits the 5 MiB OTA slot, creates a GitHub Release with both images, and *last* publishes the site
+on `gh-pages`: `manifest.json` (the over-the-air contract), the firmware, the USB-install page and the guide. A
+push to `main` only builds and tests. `docs.yml` republishes the guide alone when `docs/` changes on `main`. Both
+workflows use only the built-in `GITHUB_TOKEN`. The first run is slow (it builds ESP-IDF); later ones use caches.
+
+The steps below are what the workflow does, for doing it by hand (for instance to publish a test image).
+The C++ firmware's releases go to the same site; only `manifest.json` and `firmware/<version>/firmware.bin` need
+to change for an over-the-air release.
 
 1. **Version.** Set `version` in `Cargo.toml`. Use a prerelease of the *next* C++ version, e.g. `0.1.6-rust.1`: it
    is newer than every released C++ build but older than `0.1.6`, so the next C++ release supersedes it with no
@@ -166,5 +177,3 @@ it panics, resets, and the bootloader reverts to the previous image. Never ship 
 - The C++ app drops the CPU to 80 MHz while running; this port stays at 160 MHz.
 - The updater's JSON is parsed with `serde_json` (non-ASCII in the notes text becomes `?`, as the C++ did for
   `\u` escapes).
-- No CI yet: the generated `.github/workflows/rust_ci.yml` is the esp-idf-template's and is stale (unpinned
-  nightly, `fmt`/`clippy -D warnings` gates).

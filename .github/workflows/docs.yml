@@ -1,0 +1,58 @@
+name: Docs
+
+# Publish the user guide and its screenshots WITHOUT a firmware release. Runs
+# when docs/ changes on main, or by hand ("Run workflow").
+#
+# The website is the gh-pages branch (served by GitHub Pages). This replaces
+# only guide/ and screens/ there; the firmware, the over-the-air manifest and
+# the installer page are written by release.yml and never touched here.
+#
+# Caveat: the guide comes from main but the firmware is the latest release, so
+# avoid merging guide text that describes firmware you haven't released yet.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Shared with release.yml so the two never push gh-pages at the same moment.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages
+
+      - name: Publish the guide
+        run: |
+          rsync -a --delete docs/guide/ pages/guide/
+          rsync -a --delete docs/screens/ pages/screens/
+          cd pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "guide already up to date"
+            exit 0
+          fi
+          git commit -m "Docs from ${GITHUB_SHA::7}"
+          for i in 1 2 3; do
+            git push && exit 0
+            git pull --rebase
+          done
+          echo "::error::could not push gh-pages"
+          exit 1

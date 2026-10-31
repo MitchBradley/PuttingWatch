@@ -1,0 +1,8 @@
+# Oldest installed firmware version that may update over the air to the next
+# release. Published in manifest.json as "min_version"; a watch running
+# something older is told to reinstall over USB instead.
+#
+# Raise this whenever a release CAN'T be applied over the air to older firmware
+# - above all when the partition table changes, which only a USB install can
+# fix. Leave it alone otherwise. First line that isn't a comment is the value.
+0.0.0
