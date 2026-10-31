@@ -19,6 +19,9 @@ pub struct Co5300 {
     io: esp_lcd_panel_io_handle_t,
 }
 
+// The esp_lcd panel-IO handle is only used by whichever thread owns the Co5300.
+unsafe impl Send for Co5300 {}
+
 fn check(what: &str, err: esp_err_t) {
     if err != ESP_OK {
         panic!("{what} failed: esp_err_t {err}");

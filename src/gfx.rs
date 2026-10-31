@@ -62,9 +62,14 @@ impl DrawTarget for Strip<'_> {
 
 /// Draw the whole screen by running `scene` against every strip in turn.
 pub fn render(lcd: &Co5300, buf: &mut [u8], scene: impl Fn(&mut Strip)) {
-    let mut y = 0;
-    while y < HEIGHT {
-        let lines = STRIP_LINES.min(HEIGHT - y);
+    render_rows(lcd, buf, 0, HEIGHT, scene)
+}
+
+/// Like `render`, but only redraws rows `y_start..y_end` (y_start must be even).
+pub fn render_rows(lcd: &Co5300, buf: &mut [u8], y_start: usize, y_end: usize, scene: impl Fn(&mut Strip)) {
+    let mut y = y_start;
+    while y < y_end {
+        let lines = STRIP_LINES.min(y_end - y);
         let mut strip = Strip { buf: &mut buf[..lines * WIDTH * 2], y0: y as i32, lines: lines as i32 };
         scene(&mut strip);
         lcd.blit(0, y as u16, WIDTH as u16, lines as u16, &buf[..lines * WIDTH * 2]);
