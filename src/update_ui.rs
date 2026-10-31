@@ -1,6 +1,6 @@
 //! The update-mode screens: layout, drawing, hit-testing and the repaint policy. What each screen
 //! says comes from `putting_core::update_view::view_for`; this module only turns a `View` into
-//! pixels. Layout and styling follow the C++ updater (PuttingWatch src/update_ui.cpp): one centred
+//! pixels. Layout and styling follow the C++ updater (src/update_ui.cpp on the old-cpp-version branch): one centred
 //! column of whichever items the phase shows, stacked and centred vertically.
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};

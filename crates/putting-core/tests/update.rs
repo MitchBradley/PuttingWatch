@@ -1,4 +1,4 @@
-//! Port of PuttingWatch's test/test_updatecore (C++ / Unity): same cases, same expectations.
+//! Port of the C++ firmware's test/test_updatecore (Unity), branch `old-cpp-version`: same cases, same expectations.
 
 use core::cmp::Ordering;
 use putting_core::update::*;
@@ -71,7 +71,7 @@ fn compare_prerelease_vs_neighbours() {
 
 const SHA: &str = "db4d3ec930a1330ac9585a5667a34810be7f6885d979a301d13b8d3da0557c9b";
 
-// Exactly what PuttingWatch's tools/make_release_site.py emits.
+// Exactly what tools/make_release_site.py emits.
 const GOOD_MANIFEST: &str = r#"{
   "schema": 1,
   "version": "0.1.0",

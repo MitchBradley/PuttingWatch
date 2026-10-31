@@ -2,9 +2,10 @@
 
 A Rust port of the Honu Watch app — a putting-stroke trainer for the
 [Waveshare ESP32-C6-Touch-AMOLED-2.06](https://www.waveshare.com/) — written against
-`esp-idf-svc` (std) as a test of how mature the Rust ESP32 ecosystem is. The C++ firmware
-([PuttingWatch](https://github.com/MitchBradley/PuttingWatch)) is the reference; this port has the same
-features and is **interoperable with it over the air**: a watch can be updated from C++ to Rust, from Rust
+`esp-idf-svc` (std) as a test of how mature the Rust ESP32 ecosystem is. It replaces the original C++ firmware,
+which is kept on the [`old-cpp-version`](https://github.com/MitchBradley/PuttingWatch/tree/old-cpp-version)
+branch of this repository and was the reference for this port. The port has the same features and is
+**interoperable with it over the air**: a watch can be updated from C++ to Rust, from Rust
 to C++ and from Rust to Rust, and a bad image rolls itself back.
 
 ## What it does
@@ -147,7 +148,7 @@ to change for an over-the-air release.
    espflash save-image --chip esp32c6 --flash-size 16mb --partition-table partitions.csv --bootloader $BL $ELF firmware.bin
    espflash save-image --chip esp32c6 --flash-size 16mb --partition-table partitions.csv --bootloader $BL --merge $ELF firmware.factory.bin
    ```
-4. **Manifest.** Run PuttingWatch's `tools/make_release_site.py` on them (it writes the manifest with the size and
+4. **Manifest.** Run `tools/make_release_site.py` on them (it writes the manifest with the size and
    SHA-256 and does the same sanity checks as the C++ release), and publish `manifest.json` plus
    `firmware/<version>/firmware.bin` to the `gh-pages` branch.
 

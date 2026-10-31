@@ -15,7 +15,7 @@ CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=4096
 # Devices in the field run the C++ build's bootloader and partition table; neither can be changed
 # over the air, so a Rust image must be loadable (and OTA-updatable) under them.
 
-# The partition table is partitions.csv, identical to PuttingWatch/partitions_16MB.csv (16 MB,
+# The partition table is partitions.csv, identical to partitions_16MB.csv of the C++ firmware (branch old-cpp-version) (16 MB,
 # dual OTA). esp-idf-sys neither needs nor supports CONFIG_PARTITION_TABLE_CUSTOM here: the table is
 # applied when flashing (`espflash flash --partition-table partitions.csv`) and read at runtime.
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

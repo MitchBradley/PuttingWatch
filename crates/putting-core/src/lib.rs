@@ -1,4 +1,4 @@
-//! Pure putting-stroke logic, ported from PuttingWatch's lib/PuttingCore (C++).
+//! Pure putting-stroke logic, ported from lib/PuttingCore of the original C++ firmware (branch `old-cpp-version`).
 //! No ESP or I/O dependencies, so it builds and tests on the host.
 
 mod gravity;

@@ -1,7 +1,7 @@
 //! The watch's screens: layout, drawing and hit-testing. No swing logic here - `main` turns
 //! tracker state into a `UiState`, and touches into `Btn` presses.
 //!
-//! Layout, colours and fonts follow the C++ app (PuttingWatch src/ui.cpp). Drawing is
+//! Layout, colours and fonts follow the C++ app (src/ui.cpp on the old-cpp-version branch). Drawing is
 //! immediate-mode: `scene` paints a whole screen for the current `UiState` into whichever strip
 //! it is handed, and the display thread re-runs it only over the row bands whose inputs changed.
 

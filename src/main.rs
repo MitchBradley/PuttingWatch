@@ -21,7 +21,7 @@ use putting_core::{angle_between_degrees, Event, GravityFilter, MotionSample, St
 
 use ui::{Btn, Panel, Screen, UiState};
 
-// Waveshare ESP32-C6-Touch-AMOLED-2.06 shared I2C bus (see PuttingWatch/include/pin_config.h).
+// Waveshare ESP32-C6-Touch-AMOLED-2.06 shared I2C bus (see include/pin_config.h on the old-cpp-version branch).
 const QMI8658_ADDR: u8 = 0x6B;
 
 /// A touch ends when no report has arrived for this long (the FT3168 only reports while a finger

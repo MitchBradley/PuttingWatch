@@ -1,5 +1,5 @@
 """WAV -> 16 kHz mono 16-bit PCM conditioning for make_voice.py (copied from
-PuttingWatch/tools/wav2c_common.py).
+tools/wav2c_common.py on the old-cpp-version branch).
 
 Each source WAV (Piper output, any rate / mono or stereo / 16-bit PCM) is
 resampled to RATE, silence-trimmed, normalised, and given short raised-cosine

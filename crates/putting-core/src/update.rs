@@ -1,8 +1,8 @@
-//! Pure logic behind the on-watch firmware update, ported from PuttingWatch's lib/UpdateCore:
+//! Pure logic behind the on-watch firmware update, ported from lib/UpdateCore of the original C++ firmware (branch `old-cpp-version`):
 //! version ordering, parsing the release manifest, deciding whether to offer an update, and small
 //! helpers for the Wi-Fi setup portal. No ESP dependencies, so it is unit-tested on the host.
 //!
-//! The manifest is a contract with firmware already in the field (see PuttingWatch's
+//! The manifest is a contract with firmware already in the field (see
 //! tools/make_release_site.py): fields are only ever added, never renamed, and unknown fields are
 //! ignored here for exactly that reason.
 

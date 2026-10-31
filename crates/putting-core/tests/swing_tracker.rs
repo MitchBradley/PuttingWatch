@@ -1,4 +1,4 @@
-//! Port of PuttingWatch's test/test_swingtracker (C++ / Unity). Same scenarios, same numbers:
+//! Port of the C++ firmware's test/test_swingtracker (Unity), branch `old-cpp-version`. Same scenarios, same numbers:
 //! a steady 100 Hz MotionSample stream whose gravity is the rest vector (0,0,1) rotated about X
 //! by a known tilt, so angle_between(g, rest) == that tilt exactly.
 

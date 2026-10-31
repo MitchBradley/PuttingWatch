@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract the pixel data from a GIMP "Export as C-Source" image (as used by PuttingWatch's
+"""Extract the pixel data from a GIMP "Export as C-Source" image (as used by the C++ firmware's
 src/assets/Honu.c and HonuBottom.c) into a raw RGB565 file: width*height little-endian u16,
 exactly the panel's byte order after the CO5300 driver's big-endian swap is applied at blit time
 (the data itself is stored as GIMP wrote it: LE).

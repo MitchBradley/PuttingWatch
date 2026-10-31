@@ -1,7 +1,7 @@
 use std::process::Command;
 
-/// The firmware's version, from git, the same way the C++ build gets it (tools/fw_version.py in
-/// PuttingWatch): `git describe --tags --always --dirty`, with a leading "v" dropped. A build on a
+/// The firmware's version, from git, the same way the C++ build got it (tools/fw_version.py on the
+/// `old-cpp-version` branch): `git describe --tags --always --dirty`, with a leading "v" dropped. A build on a
 /// release tag `v1.2.0` reports exactly "1.2.0" - the string the OTA manifest carries. Between tags it
 /// is "1.2.0-3-gabc1234" (and "-dirty" with uncommitted changes), which the updater treats as a
 /// development build. Without git it is "unknown".
