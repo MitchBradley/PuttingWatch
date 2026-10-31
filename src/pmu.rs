@@ -30,6 +30,14 @@ pub fn init(i2c: &mut I2cDriver) -> Result<(), EspError> {
     set_bit(i2c, REG_ADC_CTRL, 0)
 }
 
+/// VBUS (USB / a charger) is present and good: STATUS2 bit 3 clear and STATUS1 bit 5 set, as
+/// XPowersLib's isVbusIn() decides it. A firmware update is allowed on a low battery only then.
+pub fn external_power(i2c: &mut I2cDriver) -> bool {
+    let status1 = rd(i2c, REG_STATUS1).unwrap_or(0);
+    let status2 = rd(i2c, 0x01).unwrap_or(0xFF);
+    status2 & (1 << 3) == 0 && status1 & (1 << 5) != 0
+}
+
 /// Battery terminal voltage in mV, or None if no battery is connected or the read fails.
 /// Does I2C traffic: call it every few seconds, not every frame.
 pub fn millivolts(i2c: &mut I2cDriver) -> Option<i32> {

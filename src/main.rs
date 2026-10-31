@@ -78,7 +78,7 @@ fn main() {
 
     // Update mode is its own boot: no IMU, tracking or audio, so Wi-Fi and TLS get the RAM.
     if update_mode::requested() {
-        update_mode::run(lcd, p.modem, p.pins.gpio9.into());
+        update_mode::run(lcd, i2c, p.modem, p.pins.gpio9.into(), p.pins.gpio10.into(), p.pins.gpio15.into());
     }
 
     FreeRtos::delay_ms(400);

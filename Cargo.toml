@@ -29,6 +29,7 @@ embassy-time = { version = "0.5", features = ["generic-queue-8"] }
 embedded-graphics = "0.8"
 u8g2-fonts = { version = "0.8", features = ["embedded_graphics_textstyle"] }
 putting-core = { version = "0.1.0", path = "crates/putting-core" }
+sha2 = "0.10"
 
 [build-dependencies]
 embuild = "0.33.5"
