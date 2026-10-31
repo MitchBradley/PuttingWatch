@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "min_version": "0.0.0",
-  "released": "2026-10-31T22:45:44Z",
-  "url": "https://mitchbradley.github.io/PuttingWatch/firmware/0.2.0/firmware.bin",
-  "size": 2699104,
-  "sha256": "ee4f8c007ecf5abd255349973a76ceb4088b728bbc4d8a22cad8aefc4a725d5a",
-  "notes": "Rewritten in Rust; same features as before"
+  "released": "2026-10-31T23:04:19Z",
+  "url": "https://mitchbradley.github.io/PuttingWatch/firmware/0.2.1/firmware.bin",
+  "size": 2705200,
+  "sha256": "e62501327a1fdc769db0772667e8c6260c634062307032588063cf3e37a7eaa2",
+  "notes": "Run the CPU at 80 MHz on the run screen"
 }

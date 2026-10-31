@@ -1,13 +1,13 @@
 {
   "name": "Honu Watch",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-C6",
       "parts": [
         {
-          "path": "firmware/0.2.0/firmware.factory.bin",
+          "path": "firmware/0.2.1/firmware.factory.bin",
           "offset": 0
         }
       ]
