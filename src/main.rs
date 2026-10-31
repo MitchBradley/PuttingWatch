@@ -36,6 +36,7 @@ const BYE_MS: u32 = 3000; // "Bye" screen before the PMU cuts power
 const WAKE_SWALLOW_MS: u32 = 400; // a wake tap must not also press a button
 const DOUBLE_TAP_MS: u32 = 400; // two background taps on the run screen -> light sleep
 const BOOT_DEBOUNCE_MS: u32 = 500;
+const QR_TIMEOUT_MS: u32 = 60_000; // back to Bye if nobody dismisses a QR page
 const TP_INT_GPIO: i32 = 15;
 const BOOT_GPIO: i32 = 9;
 
@@ -158,6 +159,8 @@ fn main() {
     let mut last_state = tracker.state();
 
     // Power state.
+    let mut qr_page: Option<ui::QrPage> = None; // Help / Honu QR page shown from the Bye screen
+    let mut qr_since = 0u32;
     let mut bye_until: Option<u32> = None; // Stop/BOOT pressed: show "Bye" until then, then power off
     let mut panel = Panel::On;
     let mut last_tap_ms = now_ms(); // any touch: holds the run screen on
@@ -182,7 +185,9 @@ fn main() {
         let boot_low = boot.is_low();
         if boot_low && !boot_prev && now.wrapping_sub(boot_last_trigger) > BOOT_DEBOUNCE_MS {
             boot_last_trigger = now;
-            if bye_until.is_none() {
+            if qr_page.is_some() {
+                qr_page = None; // the upper button goes back from a QR page to the Bye screen
+            } else if bye_until.is_none() {
                 log::info!("BOOT pressed -> shutdown");
                 bye_until = Some(now.wrapping_add(BYE_MS));
                 ignore_touch_until = now.wrapping_add(500);
@@ -190,6 +195,15 @@ fn main() {
             }
         }
         boot_prev = boot_low;
+
+        // A QR page stays up until dismissed or for a minute; the power-off countdown restarts
+        // when we get back to the Bye screen.
+        if qr_page.is_some() {
+            if now.wrapping_sub(qr_since) >= QR_TIMEOUT_MS {
+                qr_page = None;
+            }
+            bye_until = Some(now.wrapping_add(BYE_MS));
+        }
 
         // --- power off once the Bye screen has been shown long enough ---------------------------
         if let Some(t) = bye_until {
@@ -214,7 +228,7 @@ fn main() {
         }
 
         // --- touch: one click at touch-down, pressed look until release -------------------------
-        let screen = current_screen(bye_until.is_some(), &tracker);
+        let screen = current_screen(bye_until.is_some(), qr_page, &tracker);
         if let Some((x, y)) = touch.read(&mut i2c) {
             if !passed(now, ignore_touch_until) {
                 // swallowed (wake tap / the Stop tap): don't start a touch
@@ -233,6 +247,10 @@ fn main() {
                             pressed = Some(b);
                             match b {
                                 Btn::Recal => tracker.recal(),
+                                Btn::Help | Btn::Honu => {
+                                    qr_page = Some(if b == Btn::Help { ui::QrPage::Help } else { ui::QrPage::Honu });
+                                    qr_since = now;
+                                }
                                 Btn::Update => {
                                     // Let "Starting..." reach the screen, then restart into update mode.
                                     ui_state.lock().unwrap().pressed = pressed;
@@ -353,7 +371,7 @@ fn main() {
         }
 
         // --- screen blanking on the run screen --------------------------------------------------
-        let screen = current_screen(bye_until.is_some(), &tracker);
+        let screen = current_screen(bye_until.is_some(), qr_page, &tracker);
         let angle_now = tracker.swing_angle_degrees();
         let over = screen == Screen::Run && angle_now > ANGLE_WAKE_DEG;
         if over && !angle_over {
@@ -392,9 +410,9 @@ fn main() {
     }
 }
 
-fn current_screen(bye: bool, tracker: &SwingTracker) -> Screen {
+fn current_screen(bye: bool, qr: Option<ui::QrPage>, tracker: &SwingTracker) -> Screen {
     if bye {
-        return Screen::Bye;
+        return qr.map_or(Screen::Bye, Screen::Qr);
     }
     match tracker.state() {
         State::WaitingForCalibration => Screen::Waiting,

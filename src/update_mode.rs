@@ -35,7 +35,7 @@ use crate::provision;
 use crate::update_ui::{self, Hit, Shared};
 
 /// Where the watch looks for updates. Must match where the release workflow publishes.
-const SITE_URL: &str = match option_env!("OTA_SITE_URL") {
+pub const SITE_URL: &str = match option_env!("OTA_SITE_URL") {
     Some(u) => u,
     None => "https://mitchbradley.github.io/PuttingWatch/",
 };

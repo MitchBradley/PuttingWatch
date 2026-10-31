@@ -17,6 +17,7 @@ use u8g2_fonts::{fonts, FontRenderer};
 
 use crate::co5300::{Co5300, HEIGHT, WIDTH};
 use crate::gfx::{self, Strip};
+use qrcodegen::{QrCode, QrCodeEcc};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Screen {
@@ -28,6 +29,31 @@ pub enum Screen {
     Run,
     /// Stop pressed.
     Bye,
+    /// Bye screen's Help / Honu button: a full-screen QR code.
+    Qr(QrPage),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum QrPage {
+    Help,
+    Honu,
+}
+
+impl QrPage {
+    fn title(self) -> &'static str {
+        match self {
+            QrPage::Help => "Help",
+            QrPage::Honu => "Honu",
+        }
+    }
+
+    /// Where the code leads: the guide the release site publishes, or the product's home page.
+    fn url(self) -> String {
+        match self {
+            QrPage::Help => format!("{}guide/using.html", crate::update_mode::SITE_URL),
+            QrPage::Honu => "https://honugolf.com".to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -38,6 +64,9 @@ pub enum Btn {
     Plus,
     /// Bye screen: restart into update mode.
     Update,
+    /// Bye screen: QR code for the guide / for honugolf.com.
+    Help,
+    Honu,
 }
 
 /// What the panel itself is doing, independent of what is drawn on it.
@@ -89,6 +118,9 @@ fn btn_rect(b: Btn) -> R {
         Btn::Minus => ((W - 140) / 2 - 88, H - 104 - 16, 140, 104),
         Btn::Plus => ((W - 140) / 2 + 88, H - 104 - 16, 140, 104),
         Btn::Update => ((W - 240) / 2, (H - 76) / 2 + 110, 240, 76),
+        // Across the top like Recal / Stop, which the Bye screen doesn't have.
+        Btn::Help => ((W - 150) / 2 - 88, 12, 150, 82),
+        Btn::Honu => ((W - 150) / 2 + 88, 12, 150, 82),
     }
 }
 
@@ -99,7 +131,7 @@ const HIT_MARGIN: i32 = 24;
 pub fn hit(screen: Screen, x: i32, y: i32) -> Option<Btn> {
     let buttons: &[Btn] = match screen {
         Screen::Run => &[Btn::Recal, Btn::Stop, Btn::Minus, Btn::Plus],
-        Screen::Bye => &[Btn::Update],
+        Screen::Bye => &[Btn::Help, Btn::Honu, Btn::Update],
         _ => return None,
     };
     buttons.iter().copied().find(|&b| {
@@ -152,12 +184,19 @@ fn pill(t: &mut Strip, x: i32, y: i32, w: i32, h: i32, c: Rgb565) {
         .draw(t);
 }
 
+/// A filled rounded rectangle with an explicit corner radius.
+fn pill_rounded(t: &mut Strip, x: i32, y: i32, w: i32, h: i32, radius: u32, c: Rgb565) {
+    let _ = RoundedRectangle::with_equal_corners(Rectangle::new(Point::new(x, y), Size::new(w as u32, h as u32)), Size::new(radius, radius))
+        .into_styled(PrimitiveStyle::with_fill(c))
+        .draw(t);
+}
+
 fn button(t: &mut Strip, b: Btn, s: &UiState) {
     let (x, y, w, h) = btn_rect(b);
     let pressed = s.pressed == Some(b);
     let colour = match (b, pressed) {
-        (Btn::Update, false) => BTN_GREY,
-        (Btn::Update, true) => BTN_GREEN,
+        (Btn::Update | Btn::Help | Btn::Honu, false) => BTN_GREY,
+        (Btn::Update | Btn::Help | Btn::Honu, true) => BTN_GREEN,
         (_, false) => BTN_BLUE,
         (_, true) => BTN_BLUE_PRESSED,
     };
@@ -171,6 +210,8 @@ fn button(t: &mut Strip, b: Btn, s: &UiState) {
         Btn::Minus => text_c::<fonts::u8g2_font_logisoso34_tf>(t, "-", cx, cy, Rgb565::WHITE),
         Btn::Plus => text_c::<fonts::u8g2_font_logisoso34_tf>(t, "+", cx, cy, Rgb565::WHITE),
         // Restarting into update mode takes a moment: say so on the button itself.
+        Btn::Help => text_c::<fonts::u8g2_font_logisoso22_tf>(t, "Help", cx, cy, Rgb565::WHITE),
+        Btn::Honu => text_c::<fonts::u8g2_font_logisoso22_tf>(t, "Honu", cx, cy, Rgb565::WHITE),
         Btn::Update => text_c::<fonts::u8g2_font_logisoso24_tf>(t, if pressed { "Starting..." } else { "Update" }, cx, cy, Rgb565::WHITE),
     }
 }
@@ -190,12 +231,12 @@ fn battery_row(t: &mut Strip, cy: i32, on_white: bool, s: &UiState) {
 }
 
 /// Paint the whole screen for `s` into the strip (clipped to it).
-fn scene(t: &mut Strip, s: &UiState) {
+fn scene(t: &mut Strip, s: &UiState, qr: Option<&QrCode>) {
     let bg = match s.screen {
         Screen::Waiting => BG_WAITING,
         Screen::Hold => BG_HOLD,
         Screen::Run if s.ready => BG_READY,
-        Screen::Run | Screen::Bye => BG_IDLE,
+        Screen::Run | Screen::Bye | Screen::Qr(_) => BG_IDLE,
     };
     let _ = t.clear(rgb(bg));
 
@@ -233,7 +274,30 @@ fn scene(t: &mut Strip, s: &UiState) {
         }
         Screen::Bye => {
             text_c::<fonts::u8g2_font_logisoso34_tf>(t, "Bye", W / 2, H / 2, Rgb565::WHITE);
+            button(t, Btn::Help, s);
+            button(t, Btn::Honu, s);
             button(t, Btn::Update, s);
+        }
+        Screen::Qr(page) => {
+            text_c::<fonts::u8g2_font_logisoso24_tf>(t, page.title(), W / 2, 47, Rgb565::WHITE);
+            // QR codes need a light quiet zone around them on a dark screen.
+            pill_rounded(t, (W - 280) / 2, (H - 280) / 2 + 10, 280, 280, 12, Rgb565::WHITE);
+            if let Some(qr) = qr {
+                let n = qr.size();
+                let scale = (252 / n).max(1);
+                let off = (252 - scale * n) / 2;
+                let (bx, by) = ((W - 252) / 2 + off, (H - 252) / 2 + 10 + off);
+                for y in 0..n {
+                    for x in 0..n {
+                        if qr.get_module(x, y) {
+                            let _ = Rectangle::new(Point::new(bx + x * scale, by + y * scale), Size::new(scale as u32, scale as u32))
+                                .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                                .draw(t);
+                        }
+                    }
+                }
+            }
+            text_c::<fonts::u8g2_font_helvR14_tf>(t, "Upper button to go back", W / 2, H - 34 - 12, rgb(0x909090));
         }
     }
 }
@@ -263,7 +327,9 @@ fn dirty_bands(prev: Option<&UiState>, cur: &UiState) -> Vec<(usize, usize)> {
         v.push(TOP);
     }
     if cur.screen == Screen::Bye && p.pressed != cur.pressed {
-        v.push(MID); // the Update button straddles both bands
+        // Help / Honu are in the top band; the Update button straddles the other two.
+        v.push(TOP);
+        v.push(MID);
         v.push(BOT);
     }
     if cur.screen == Screen::Run {
@@ -284,10 +350,17 @@ fn dirty_bands(prev: Option<&UiState>, cur: &UiState) -> Vec<(usize, usize)> {
 pub fn display_thread(lcd: Co5300, state: Arc<Mutex<UiState>>, applied: Arc<AtomicU8>) {
     let mut buf = vec![0u8; WIDTH * gfx::STRIP_LINES * 2];
     let mut drawn: Option<UiState> = None;
+    let mut qr: Option<(QrPage, QrCode)> = None;
     let mut hw = Panel::On;
     loop {
         FreeRtos::delay_ms(30);
         let cur = *state.lock().unwrap();
+        if let Screen::Qr(page) = cur.screen {
+            if qr.as_ref().map(|(p, _)| *p) != Some(page) {
+                qr = QrCode::encode_text(&page.url(), QrCodeEcc::Medium).ok().map(|q| (page, q));
+            }
+        }
+        let qr_ref = qr.as_ref().map(|(_, q)| q);
 
         if cur.panel != hw {
             match (hw, cur.panel) {
@@ -308,7 +381,7 @@ pub fn display_thread(lcd: Co5300, state: Arc<Mutex<UiState>>, applied: Arc<Atom
                         lcd.sleep_out();
                     }
                     for (y0, y1) in dirty_bands(None, &cur) {
-                        gfx::render_rows(&lcd, &mut buf, y0, y1, |t| scene(t, &cur));
+                        gfx::render_rows(&lcd, &mut buf, y0, y1, |t| scene(t, &cur, qr_ref));
                     }
                     drawn = Some(cur);
                     lcd.display_on();
@@ -328,7 +401,7 @@ pub fn display_thread(lcd: Co5300, state: Arc<Mutex<UiState>>, applied: Arc<Atom
             continue;
         }
         for (y0, y1) in dirty_bands(drawn.as_ref(), &cur) {
-            gfx::render_rows(&lcd, &mut buf, y0, y1, |t| scene(t, &cur));
+            gfx::render_rows(&lcd, &mut buf, y0, y1, |t| scene(t, &cur, qr_ref));
         }
         drawn = Some(cur);
     }
