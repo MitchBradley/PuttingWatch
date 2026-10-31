@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "version": "0.1.6-rust.1",
+  "version": "0.1.6-rust.2",
   "min_version": "0.0.0",
-  "released": "2026-10-31T20:29:41Z",
-  "url": "https://mitchbradley.github.io/PuttingWatch/firmware/0.1.6-rust.1/firmware.bin",
-  "size": 2700704,
-  "sha256": "65ea254442b032b2c9f71bd4eded43ff1f5cd2ca297c961db67b2783c3602f8a",
-  "notes": "Experimental Rust port of the Honu Watch app"
+  "released": "2026-10-31T20:42:54Z",
+  "url": "https://mitchbradley.github.io/PuttingWatch/firmware/0.1.6-rust.2/firmware.bin",
+  "size": 391520,
+  "sha256": "f28a74fb4ee26506704989df4dc24459407898dd52b5d9cd05856c2ade68926d",
+  "notes": "Rollback test: crashes on boot, do not install"
 }
