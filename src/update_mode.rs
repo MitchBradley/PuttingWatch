@@ -39,7 +39,8 @@ pub const SITE_URL: &str = match option_env!("OTA_SITE_URL") {
     Some(u) => u,
     None => "https://mitchbradley.github.io/PuttingWatch/",
 };
-const RUNNING_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Set by build.rs from `git describe` (see there): the tag, without the leading "v", on a release build.
+const RUNNING_VERSION: &str = env!("FW_VERSION");
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const JOIN_TIMEOUT: Duration = Duration::from_secs(20);

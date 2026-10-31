@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "putting-watch-rs"
-version = "0.1.6-rust.1"
+version = "0.0.0"
 dependencies = [
  "embedded-graphics",
  "embuild",

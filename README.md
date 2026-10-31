@@ -120,8 +120,11 @@ namespace (`wifi`) the C++ updater uses, so they survive a switch between the tw
 
 ## Releasing
 
-**CI does it.** Push a tag `vX.Y.Z` (or `vX.Y.Z-beta.1`) whose version equals `version` in `Cargo.toml`
-(the firmware reports that as its running version, and the workflow refuses a mismatch). The Release workflow
+**CI does it, from a tag alone.** Push a tag `vX.Y.Z` (or `vX.Y.Z-beta.1`) — nothing else to edit. The firmware's
+version comes from git, as in the C++ firmware: `build.rs` runs `git describe --tags --always --dirty` and drops
+the leading `v`, so a build on tag `v0.1.6` reports exactly `0.1.6`, the string the manifest carries. Between tags
+it reports `0.1.6-3-gabc1234` (and `-dirty` with uncommitted changes), which the updater treats as a development
+build. `Cargo.toml`'s `version` is not used. The Release workflow
 (`.github/workflows/release.yml`) runs the host tests, builds with no Wi-Fi credentials, makes the images, checks
 the app image fits the 5 MiB OTA slot, creates a GitHub Release with both images, and *last* publishes the site
 on `gh-pages`: `manifest.json` (the over-the-air contract), the firmware, the USB-install page and the guide. A
@@ -132,9 +135,10 @@ The steps below are what the workflow does, for doing it by hand (for instance t
 The C++ firmware's releases go to the same site; only `manifest.json` and `firmware/<version>/firmware.bin` need
 to change for an over-the-air release.
 
-1. **Version.** Set `version` in `Cargo.toml`. Use a prerelease of the *next* C++ version, e.g. `0.1.6-rust.1`: it
-   is newer than every released C++ build but older than `0.1.6`, so the next C++ release supersedes it with no
-   manual revoking. The running version the updater compares comes from `CARGO_PKG_VERSION`.
+1. **Version.** Tag the commit first (`git tag -a v0.1.6 -m "summary"`): the build takes its version from the tag.
+   For a Rust image published alongside C++ releases, a prerelease of the *next* C++ version, e.g.
+   `v0.1.6-rust.1`, is newer than every released C++ build but older than `0.1.6`, so the next C++ release
+   supersedes it with no manual revoking.
 2. **Build** with the Wi-Fi variables unset: `cargo build --release`.
 3. **Images.** The OTA file is a bare app image, the USB installer wants a merged one:
    ```sh

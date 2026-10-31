@@ -1,6 +1,7 @@
 [package]
 name = "putting-watch-rs"
-version = "0.1.6-rust.1"
+# Not the firmware's version: that comes from the git tag (see build.rs).
+version = "0.0.0"
 authors = ["Mitch Bradley <wmb@firmworks.com>"]
 edition = "2021"
 resolver = "2"

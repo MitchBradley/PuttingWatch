@@ -5,8 +5,8 @@ name: Release
 #   - the website, on the gh-pages branch (served by GitHub Pages): USB install
 #     page + manifest.json for over-the-air updates (holds only the newest
 #     release) + the user guide
-# The tag must match `version` in Cargo.toml: the firmware reports that as its
-# own version, and the updater compares it with the manifest.
+# The tag is the version: build.rs takes the firmware's version from `git describe`
+# (a build on tag v1.2.0 reports "1.2.0"), the same way the C++ firmware does.
 #
 # A push to main (or rust), or "Run workflow" from the Actions tab, does the
 # build and tests only - handy for checking CI works before tagging; nothing is
@@ -28,6 +28,8 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # git describe (the firmware version) needs the tags
 
       - name: Check tag format
         if: startsWith(github.ref, 'refs/tags/')
@@ -81,15 +83,19 @@ jobs:
       - name: Build firmware
         run: cargo build --release
 
+      # build.rs derived the firmware's version from `git describe` with the same command. On a
+      # tag it must be exactly the tag: anything else (a second tag on the commit, a dirty tree)
+      # would make a watch offer itself the update it just installed.
       - name: Check the built version matches the tag
         id: ver
         run: |
-          built=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n1)
+          built=$(git describe --tags --always --dirty)
+          built="${built#v}"
           echo "firmware reports: $built"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             expected="${GITHUB_REF_NAME#v}"
             if [[ "$built" != "$expected" ]]; then
-              echo "::error::Cargo.toml says '$built' but the tag says '$expected'"
+              echo "::error::the firmware would report '$built' but the tag says '$expected'"
               exit 1
             fi
           fi

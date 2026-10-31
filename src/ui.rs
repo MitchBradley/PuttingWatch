@@ -249,7 +249,7 @@ fn scene(t: &mut Strip, s: &UiState, qr: Option<&QrCode>) {
                 battery_row(t, BATT_CY_WAIT, true, s);
                 text_at::<fonts::u8g2_font_helvR14_tf>(
                     t,
-                    concat!("v", env!("CARGO_PKG_VERSION")),
+                    concat!("v", env!("FW_VERSION")),
                     W * 7 / 10,
                     H - 49,
                     HorizontalAlignment::Left,
