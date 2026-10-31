@@ -2,6 +2,7 @@ mod audio;
 mod co5300;
 mod gfx;
 mod touch;
+mod voice_index;
 
 use esp_idf_svc::hal::delay::{FreeRtos, BLOCK};
 use esp_idf_svc::hal::i2c::{I2cConfig, I2cDriver};
@@ -66,6 +67,11 @@ fn scene(t: &mut gfx::Strip) {
 
 /// Diagnostic switch: set false to run without the display thread.
 const USE_DISPLAY_THREAD: bool = true;
+
+/// Sensitivity level for a peak angle: level 1 = 3.0 deg, +0.9 deg per level (matches the C++ app).
+fn level_for_degrees(deg: f32) -> i32 {
+    ((deg - 3.0) / 0.9).round() as i32 + 1
+}
 
 const STATUS_Y0: usize = 150;
 const STATUS_Y1: usize = 360;
@@ -273,11 +279,14 @@ fn main() {
                         log::info!("calibrated")
                     }
                     Event::Ready => {
-                        audio.play(audio::Sound::Tick); // the C++ app speaks a voice cue here
+                        audio.play(audio::Sound::Ready);
                         log::info!("READY")
                     }
                     Event::SwingComplete(p) => {
                         last_peak = Some(p);
+                        // Speak the peak as a sensitivity level, same scale as the click-threshold levels.
+                        let n = level_for_degrees(p).clamp(1, audio::MAX_SPOKEN_NUMBER as i32);
+                        audio.play(audio::Sound::Number(n as u8));
                         log::info!("swing complete, peak {p:.1} deg")
                     }
                     Event::DirectionLocked(a) => log::info!("direction locked at {a:.1} deg"),
