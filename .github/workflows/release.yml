@@ -53,16 +53,21 @@ jobs:
           rustup toolchain install 2>/dev/null || rustup show
           rustc --version
 
+      # Installed into a directory of their own and cached from there: on the runner ~/.cargo/bin is a
+      # symlink, which actions/cache archives as a 551-byte link rather than the binaries it points to.
       - name: Cache cargo tools
         id: tools
         uses: actions/cache@v4
         with:
-          path: ~/.cargo/bin
-          key: cargo-tools-${{ runner.os }}-espflash-ldproxy-v1
+          path: ~/cargo-tools
+          key: cargo-tools-${{ runner.os }}-espflash-ldproxy-v2
 
       - name: Install ldproxy and espflash
         if: steps.tools.outputs.cache-hit != 'true'
-        run: cargo install --locked ldproxy espflash
+        run: cargo install --locked --root ~/cargo-tools ldproxy espflash
+
+      - name: Put the tools on PATH
+        run: echo "$HOME/cargo-tools/bin" >> "$GITHUB_PATH"
 
       # ESP-IDF itself (cloned and built by esp-idf-sys): several GB, so cache it.
       - name: Cache ESP-IDF
