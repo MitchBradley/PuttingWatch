@@ -27,6 +27,30 @@ impl OriginDimensions for Strip<'_> {
     }
 }
 
+impl Strip<'_> {
+    /// Copy a raw RGB565 image (width*height little-endian u16, as GIMP exports it) to (x, y),
+    /// clipped to this strip. Much faster than going through `draw_iter`.
+    pub fn blit_rgb565_le(&mut self, x: i32, y: i32, w: i32, h: i32, data: &[u8]) {
+        for row in 0..h {
+            let dy = y + row - self.y0;
+            if dy < 0 || dy >= self.lines {
+                continue;
+            }
+            for col in 0..w {
+                let dx = x + col;
+                if dx < 0 || dx >= WIDTH as i32 {
+                    continue;
+                }
+                let s = ((row * w + col) * 2) as usize;
+                let d = (dy as usize * WIDTH + dx as usize) * 2;
+                // The panel wants big-endian RGB565; the image is little-endian.
+                self.buf[d] = data[s + 1];
+                self.buf[d + 1] = data[s];
+            }
+        }
+    }
+}
+
 impl DrawTarget for Strip<'_> {
     type Color = Rgb565;
     type Error = Infallible;
