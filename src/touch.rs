@@ -35,6 +35,11 @@ impl<'d> Touch<'d> {
         Touch { int: PinDriver::input(int, Pull::Floating).unwrap() }
     }
 
+    /// INT is asserted (low) while the controller has a report pending.
+    pub fn int_is_low(&self) -> bool {
+        self.int.is_low()
+    }
+
     /// First finger's position if a finger is down: reads only while INT is asserted.
     pub fn read(&mut self, i2c: &mut I2cDriver) -> Option<(u16, u16)> {
         if self.int.is_high() {

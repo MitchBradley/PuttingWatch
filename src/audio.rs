@@ -23,6 +23,8 @@ pub const MAX_SPOKEN_NUMBER: u8 = (crate::voice_index::NUMBERS.len() - 1) as u8;
 const READY_GAIN: f32 = 2.0;
 
 const CODEC_ADDR: u8 = 0x18;
+const PA_CTRL_GPIO: i32 = 6;
+static AMP_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const SAMPLE_RATE: u32 = 16_000;
 const VOLUME: u32 = 70; // 0..100, same as the C++ app
 
@@ -46,6 +48,19 @@ pub struct Audio {
 }
 
 impl Audio {
+    /// Switch the speaker amp. Enabling blocks ~10 ms so the amp is out of shutdown before the
+    /// first sample (call it early, e.g. when calibration starts).
+    pub fn set_amp(&self, on: bool) {
+        use std::sync::atomic::Ordering;
+        if AMP_ON.swap(on, Ordering::Relaxed) == on {
+            return;
+        }
+        unsafe { esp_idf_svc::sys::gpio_set_level(PA_CTRL_GPIO, on as u32) };
+        if on {
+            FreeRtos::delay_ms(10);
+        }
+    }
+
     /// Queue a sound; never blocks. Dropped if the audio thread is gone.
     pub fn play(&self, s: Sound) {
         let _ = self.tx.send(s);
@@ -78,11 +93,10 @@ impl Audio {
         i2s.tx_enable()?;
         codec_init(i2c)?;
 
-        // Amp enable: the C++ app keeps it off except while sounds can play; here it just stays on.
+        // Amp enable (NS4150B): off until `set_amp(true)`, to save its quiescent current.
         let mut pa = PinDriver::output(pa_ctrl)?;
-        pa.set_high()?;
-        core::mem::forget(pa);
-        FreeRtos::delay_ms(10); // out of shutdown before the first sample
+        pa.set_low()?;
+        core::mem::forget(pa); // keep the pin configured as an output
 
         let click = render_chirp_square(50, 1500.0, 2500.0, 1.0);
         let tick = render_tone(14, 1150.0, 0.6);

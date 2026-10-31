@@ -6,15 +6,17 @@ mod touch;
 mod ui;
 mod voice_index;
 
+use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Mutex};
 
 use esp_idf_svc::hal::delay::{FreeRtos, BLOCK};
+use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 use esp_idf_svc::hal::i2c::{I2cConfig, I2cDriver};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::units::Hertz;
 use putting_core::{angle_between_degrees, Event, GravityFilter, MotionSample, State, SwingTracker, Vec3};
 
-use ui::{Btn, Screen, UiState};
+use ui::{Btn, Panel, Screen, UiState};
 
 // Waveshare ESP32-C6-Touch-AMOLED-2.06 shared I2C bus (see PuttingWatch/include/pin_config.h).
 const QMI8658_ADDR: u8 = 0x6B;
@@ -22,6 +24,17 @@ const QMI8658_ADDR: u8 = 0x6B;
 /// A touch ends when no report has arrived for this long (the FT3168 only reports while a finger
 /// is down; reports repeat every ~10 ms).
 const TOUCH_RELEASE_MS: u32 = 120;
+
+/// Power behaviour, as in the C++ app.
+const BRIGHT_HOLD_MS: u32 = 5000; // run screen blanks this long after the last touch...
+const ANGLE_WAKE_DEG: f32 = 45.0; // ...and this long after a swing angle past this (looking at the watch)
+const ANGLE_WAKE_HOLD_MS: u32 = 10_000;
+const BYE_MS: u32 = 3000; // "Bye" screen before the PMU cuts power
+const WAKE_SWALLOW_MS: u32 = 400; // a wake tap must not also press a button
+const DOUBLE_TAP_MS: u32 = 400; // two background taps on the run screen -> light sleep
+const BOOT_DEBOUNCE_MS: u32 = 500;
+const TP_INT_GPIO: i32 = 15;
+const BOOT_GPIO: i32 = 9;
 
 /// Click sensitivity levels: level 1 = 3.0 deg, +0.9 deg per level, 16 levels (as in the C++ app).
 const LEVEL_BASE_DEGREES: f32 = 3.0;
@@ -102,6 +115,8 @@ fn main() {
     .expect("audio init");
 
     let mut touch = touch::Touch::new(&mut i2c, p.pins.gpio10.into(), p.pins.gpio15.into());
+    // BOOT (GPIO9): idle high, low while pressed. Doubles as the shutdown button.
+    let boot = PinDriver::input(p.pins.gpio9, Pull::Up).unwrap();
 
     let mut filter = GravityFilter::default();
     let mut tracker = SwingTracker::default();
@@ -115,12 +130,14 @@ fn main() {
         batt_pct: -1,
         batt_mv: 0,
         pressed: None,
+        panel: Panel::On,
     }));
+    let panel_applied = Arc::new(AtomicU8::new(Panel::On as u8));
     {
-        let ui_state = ui_state.clone();
+        let (ui_state, applied) = (ui_state.clone(), panel_applied.clone());
         std::thread::Builder::new()
             .stack_size(16 * 1024)
-            .spawn(move || ui::display_thread(lcd, ui_state))
+            .spawn(move || ui::display_thread(lcd, ui_state, applied))
             .unwrap();
     }
 
@@ -129,45 +146,126 @@ fn main() {
     let mut tick = 0u32;
     let mut last_state = tracker.state();
 
-    let mut bye = false; // Stop was pressed
+    // Power state.
+    let mut bye_until: Option<u32> = None; // Stop/BOOT pressed: show "Bye" until then, then power off
+    let mut panel = Panel::On;
+    let mut last_tap_ms = now_ms(); // any touch: holds the run screen on
+    let mut last_bg_tap_ms = 0u32; // background taps, for double-tap -> light sleep
+    let mut last_angle_wake_ms = 0u32;
+    let mut angle_over = false;
+    let mut ignore_touch_until = 0u32; // swallow touches until then (wake tap, Stop tap)
+    let mut want_sleep = false;
+    let mut boot_prev = boot.is_low();
+    let mut boot_last_trigger = 0u32;
+
     let (mut touching, mut last_touch_ms, mut pressed) = (false, 0u32, None::<Btn>);
     let (mut batt_mv_ema, mut batt_pct, mut batt_next_ms) = (0i32, -1i32, 0u32);
+
+    // Signed "has `t` passed" for wrapping millisecond timestamps.
+    let passed = |now: u32, t: u32| (now.wrapping_sub(t) as i32) >= 0;
 
     loop {
         let now = now_ms();
 
+        // --- BOOT button: the same graceful shutdown as Stop ------------------------------------
+        let boot_low = boot.is_low();
+        if boot_low && !boot_prev && now.wrapping_sub(boot_last_trigger) > BOOT_DEBOUNCE_MS {
+            boot_last_trigger = now;
+            if bye_until.is_none() {
+                log::info!("BOOT pressed -> shutdown");
+                bye_until = Some(now.wrapping_add(BYE_MS));
+                ignore_touch_until = now.wrapping_add(500);
+                panel = Panel::On;
+            }
+        }
+        boot_prev = boot_low;
+
+        // --- power off once the Bye screen has been shown long enough ---------------------------
+        if let Some(t) = bye_until {
+            if passed(now, t) {
+                log::info!("shutdown: PMU power off (press PWR to wake)");
+                audio.set_amp(false);
+                panel = Panel::Asleep;
+                ui_state.lock().unwrap().panel = panel;
+                ui::wait_for_panel(&panel_applied, Panel::Asleep, 1500);
+                match pmu::shutdown(&mut i2c) {
+                    Ok(()) => loop {
+                        FreeRtos::delay_ms(1000); // rails drop before this returns
+                    },
+                    Err(e) => {
+                        // Don't strand the user with a dead Stop button: sleep instead.
+                        log::error!("PMU shutdown failed ({e:?}); falling back to light sleep");
+                        bye_until = None;
+                        want_sleep = true;
+                    }
+                }
+            }
+        }
+
         // --- touch: one click at touch-down, pressed look until release -------------------------
-        let screen = current_screen(bye, &tracker);
+        let screen = current_screen(bye_until.is_some(), &tracker);
         if let Some((x, y)) = touch.read(&mut i2c) {
-            last_touch_ms = now;
-            if !touching {
-                touching = true;
-                match ui::hit(screen, x as i32, y as i32) {
-                    Some(b) => {
-                        pressed = Some(b);
-                        match b {
-                            Btn::Recal => tracker.recal(),
-                            Btn::Stop => bye = true,
-                            Btn::Minus | Btn::Plus => {
-                                let delta = if b == Btn::Plus { 1 } else { -1 };
-                                let level = (level_for_degrees(tracker.click_threshold_degrees()) + delta).clamp(1, LEVEL_COUNT);
-                                tracker.set_click_threshold_degrees(degrees_for_level(level));
-                                audio.play(audio::Sound::Number(level as u8));
+            if !passed(now, ignore_touch_until) {
+                // swallowed (wake tap / the Stop tap): don't start a touch
+            } else if panel != Panel::On {
+                // First touch on a dark screen only wakes it.
+                panel = Panel::On;
+                ignore_touch_until = now.wrapping_add(WAKE_SWALLOW_MS);
+                last_tap_ms = now;
+            } else if bye_until.is_none() {
+                last_tap_ms = now;
+                last_touch_ms = now;
+                if !touching {
+                    touching = true;
+                    match ui::hit(screen, x as i32, y as i32) {
+                        Some(b) => {
+                            pressed = Some(b);
+                            match b {
+                                Btn::Recal => tracker.recal(),
+                                Btn::Stop => {
+                                    bye_until = Some(now.wrapping_add(BYE_MS));
+                                    ignore_touch_until = now.wrapping_add(500);
+                                }
+                                Btn::Minus | Btn::Plus => {
+                                    let delta = if b == Btn::Plus { 1 } else { -1 };
+                                    let level = (level_for_degrees(tracker.click_threshold_degrees()) + delta).clamp(1, LEVEL_COUNT);
+                                    tracker.set_click_threshold_degrees(degrees_for_level(level));
+                                    audio.play(audio::Sound::Number(level as u8));
+                                }
+                            }
+                        }
+                        None => {
+                            tracker.tap(); // starts calibration; no-op outside the waiting screen
+                            if screen == Screen::Run {
+                                if now.wrapping_sub(last_bg_tap_ms) < DOUBLE_TAP_MS {
+                                    want_sleep = true;
+                                }
+                                last_bg_tap_ms = now;
                             }
                         }
                     }
-                    None if bye => {
-                        // Any touch wakes from "Bye" back to a fresh calibration.
-                        bye = false;
-                        tracker.recal();
-                    }
-                    None => tracker.tap(), // starts calibration; no-op outside the waiting screen
                 }
             }
         }
         if touching && now.wrapping_sub(last_touch_ms) > TOUCH_RELEASE_MS {
             touching = false;
             pressed = None;
+        }
+
+        // --- light sleep (double-tap on the run screen) -----------------------------------------
+        if want_sleep {
+            want_sleep = false;
+            light_sleep(&mut i2c, &mut touch, &audio, &ui_state, &panel_applied);
+            // Resume exactly where we left off; the wake tap must not hit a button.
+            let t = now_ms();
+            panel = Panel::On;
+            ignore_touch_until = t.wrapping_add(WAKE_SWALLOW_MS);
+            last_tap_ms = t;
+            prev_ms = t;
+            touching = false;
+            pressed = None;
+            boot_prev = boot.is_low(); // BOOT woke us: don't also read that as a shutdown press
+            continue;
         }
 
         // --- IMU -> filter -> tracker -------------------------------------------------------------
@@ -237,16 +335,39 @@ fn main() {
             }
         }
 
+        // --- screen blanking on the run screen --------------------------------------------------
+        let screen = current_screen(bye_until.is_some(), &tracker);
+        let angle_now = tracker.swing_angle_degrees();
+        let over = screen == Screen::Run && angle_now > ANGLE_WAKE_DEG;
+        if over && !angle_over {
+            // A big angle isn't putting motion: someone is looking at the watch. Light it up.
+            last_angle_wake_ms = now;
+            panel = Panel::On;
+        }
+        angle_over = over;
+        if screen != Screen::Run && bye_until.is_none() {
+            panel = Panel::On; // only the run screen ever blanks
+        } else if panel == Panel::On
+            && screen == Screen::Run
+            && now.wrapping_sub(last_tap_ms) >= BRIGHT_HOLD_MS
+            && now.wrapping_sub(last_angle_wake_ms) >= ANGLE_WAKE_HOLD_MS
+        {
+            panel = Panel::Blanked;
+        }
+
+        // The speaker amp only needs power while sounds can play.
+        audio.set_amp(bye_until.is_none() && tracker.state() != State::WaitingForCalibration);
+
         // --- publish to the display thread ---------------------------------------------------------
-        let screen = current_screen(bye, &tracker);
         *ui_state.lock().unwrap() = UiState {
             screen,
             ready: tracker.is_ready_for_swing(),
-            angle10: if screen == Screen::Run { (tracker.swing_angle_degrees() * 10.0).round() as i32 } else { 0 },
+            angle10: if screen == Screen::Run { (angle_now * 10.0).round() as i32 } else { 0 },
             level: level_for_degrees(tracker.click_threshold_degrees()),
             batt_pct,
             batt_mv: batt_mv_ema,
             pressed,
+            panel,
         };
 
         tick = tick.wrapping_add(1);
@@ -264,4 +385,44 @@ fn current_screen(bye: bool, tracker: &SwingTracker) -> Screen {
         // Done is a brief pass-through to Monitoring; draw it as Monitoring.
         State::Done | State::Monitoring => Screen::Run,
     }
+}
+
+/// Light sleep: panel and amp off, CPU halted; a touch (FT3168 INT low) or BOOT wakes it and
+/// everything resumes where it left off (RAM is retained, so the tracker state survives). Note the
+/// USB serial console drops while asleep.
+fn light_sleep(
+    i2c: &mut I2cDriver,
+    touch: &mut touch::Touch,
+    audio: &audio::Audio,
+    ui_state: &Arc<Mutex<UiState>>,
+    applied: &Arc<AtomicU8>,
+) {
+    log::info!("light sleep (touch the screen to wake)");
+
+    // Let the touch that got us here lift and drain the controller so INT deasserts: a
+    // level-triggered wake armed while INT is still low returns from sleep immediately.
+    for _ in 0..120 {
+        if !touch.int_is_low() {
+            break;
+        }
+        let _ = touch.read(i2c);
+        FreeRtos::delay_ms(25);
+    }
+
+    audio.set_amp(false);
+    ui_state.lock().unwrap().panel = Panel::Asleep;
+    ui::wait_for_panel(applied, Panel::Asleep, 1500);
+    FreeRtos::delay_ms(20);
+
+    unsafe {
+        use esp_idf_svc::sys::*;
+        esp_sleep_enable_gpio_wakeup();
+        gpio_wakeup_enable(TP_INT_GPIO, gpio_int_type_t_GPIO_INTR_LOW_LEVEL);
+        gpio_wakeup_enable(BOOT_GPIO, gpio_int_type_t_GPIO_INTR_LOW_LEVEL);
+        esp_light_sleep_start();
+        gpio_wakeup_disable(TP_INT_GPIO);
+        gpio_wakeup_disable(BOOT_GPIO);
+    }
+    log::info!("woke from light sleep");
+    ui_state.lock().unwrap().panel = Panel::On;
 }

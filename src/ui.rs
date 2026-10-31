@@ -5,6 +5,7 @@
 //! immediate-mode: `scene` paints a whole screen for the current `UiState` into whichever strip
 //! it is handed, and the display thread re-runs it only over the row bands whose inputs changed.
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use embedded_graphics::pixelcolor::Rgb565;
@@ -37,6 +38,22 @@ pub enum Btn {
     Plus,
 }
 
+/// What the panel itself is doing, independent of what is drawn on it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Panel {
+    On,
+    /// DISPOFF: dark, but the frame is kept and the link stays usable (run-screen blanking).
+    Blanked,
+    /// DISPOFF + SLPIN: before light sleep or power-off.
+    Asleep,
+}
+
+impl Panel {
+    fn code(self) -> u8 {
+        self as u8
+    }
+}
+
 /// Everything the display depends on.
 #[derive(Clone, Copy, PartialEq)]
 pub struct UiState {
@@ -52,6 +69,7 @@ pub struct UiState {
     pub batt_mv: i32,
     /// Button currently held down, drawn in its pressed colour.
     pub pressed: Option<Btn>,
+    pub panel: Panel,
 }
 
 // --- layout (screen coordinates, 410 x 502) --------------------------------------------------
@@ -237,14 +255,53 @@ fn dirty_bands(prev: Option<&UiState>, cur: &UiState) -> Vec<(usize, usize)> {
     v
 }
 
-/// Repaints the screen whenever the shared `UiState` changes. Runs on its own thread: a redraw
-/// takes tens of milliseconds of CPU and must never delay IMU sampling.
-pub fn display_thread(lcd: Co5300, state: Arc<Mutex<UiState>>) {
+/// Repaints the screen whenever the shared `UiState` changes, and drives the panel's power mode.
+/// Runs on its own thread: a redraw takes tens of milliseconds of CPU and must never delay IMU
+/// sampling. `applied` is set to the `Panel` mode the hardware has actually reached, so the
+/// sampling thread can wait for "dark" before cutting power.
+pub fn display_thread(lcd: Co5300, state: Arc<Mutex<UiState>>, applied: Arc<AtomicU8>) {
     let mut buf = vec![0u8; WIDTH * gfx::STRIP_LINES * 2];
     let mut drawn: Option<UiState> = None;
+    let mut hw = Panel::On;
     loop {
         FreeRtos::delay_ms(30);
         let cur = *state.lock().unwrap();
+
+        if cur.panel != hw {
+            match (hw, cur.panel) {
+                (Panel::On, Panel::Blanked) => lcd.display_off(),
+                (Panel::On, Panel::Asleep) => {
+                    lcd.display_off();
+                    FreeRtos::delay_ms(120);
+                    lcd.sleep_in();
+                }
+                (Panel::Blanked, Panel::Asleep) => lcd.sleep_in(),
+                (Panel::Asleep, Panel::Blanked) => {
+                    lcd.sleep_out();
+                }
+                (_, Panel::On) => {
+                    // Draw the current screen while the panel is still dark, then reveal it, so the
+                    // stale frame that was in GRAM never flashes.
+                    if hw == Panel::Asleep {
+                        lcd.sleep_out();
+                    }
+                    for (y0, y1) in dirty_bands(None, &cur) {
+                        gfx::render_rows(&lcd, &mut buf, y0, y1, |t| scene(t, &cur));
+                    }
+                    drawn = Some(cur);
+                    lcd.display_on();
+                    lcd.set_brightness(0xD0);
+                }
+                _ => {}
+            }
+            hw = cur.panel;
+            applied.store(hw.code(), Ordering::Release);
+            continue;
+        }
+        if hw != Panel::On {
+            continue; // dark: don't spend CPU drawing; the wake path repaints everything
+        }
+
         if drawn.as_ref() == Some(&cur) {
             continue;
         }
@@ -253,4 +310,17 @@ pub fn display_thread(lcd: Co5300, state: Arc<Mutex<UiState>>) {
         }
         drawn = Some(cur);
     }
+}
+
+/// Block until the display thread reports the panel has reached `want` (or `timeout_ms` passes).
+pub fn wait_for_panel(applied: &AtomicU8, want: Panel, timeout_ms: u32) -> bool {
+    let mut waited = 0;
+    while applied.load(Ordering::Acquire) != want.code() {
+        if waited >= timeout_ms {
+            return false;
+        }
+        FreeRtos::delay_ms(10);
+        waited += 10;
+    }
+    true
 }

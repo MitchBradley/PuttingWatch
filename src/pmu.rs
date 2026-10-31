@@ -41,6 +41,13 @@ pub fn millivolts(i2c: &mut I2cDriver) -> Option<i32> {
     Some((((h & 0x1F) as i32) << 8) | l as i32)
 }
 
+/// Cut every rail but VRTC, the ESP32's own supply included. The PMU's PWRON pin (the PWR key,
+/// wired to it in hardware) is the only thing that brings the rails back, as a normal cold boot.
+/// Does not return in practice: the MCU loses power before the caller's next line.
+pub fn shutdown(i2c: &mut I2cDriver) -> Result<(), EspError> {
+    set_bit(i2c, 0x10, 0)
+}
+
 /// (mV, %) knots of a rested single-cell LiPo, as in the C++ app. The top knot is 4115, not the
 /// nominal 4200: this board's charger tops out there in practice.
 const CURVE: [(i32, i32); 11] = [

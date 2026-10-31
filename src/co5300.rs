@@ -103,6 +103,27 @@ impl Co5300 {
         self.cmd(0x51, &[b]);
     }
 
+    /// Stop emitting light (DISPOFF). GRAM is kept and the QSPI link stays usable, so a frame
+    /// can be drawn while dark and then revealed with `display_on`.
+    pub fn display_off(&self) {
+        self.cmd(0x28, &[]);
+    }
+
+    pub fn display_on(&self) {
+        self.cmd(0x29, &[]);
+    }
+
+    /// Deep panel sleep (SLPIN); leave it with `sleep_out`, which needs ~120 ms to settle.
+    pub fn sleep_in(&self) {
+        self.cmd(0x10, &[]);
+        FreeRtos::delay_ms(120);
+    }
+
+    pub fn sleep_out(&self) {
+        self.cmd(0x11, &[]);
+        FreeRtos::delay_ms(120);
+    }
+
     /// Push big-endian RGB565 `pixels` (w*h*2 bytes, DMA-capable) into the window at (x, y).
     /// x must be even and x+w odd (CO5300 column pairing); same for y.
     pub fn blit(&self, x: u16, y: u16, w: u16, h: u16, pixels: &[u8]) {
