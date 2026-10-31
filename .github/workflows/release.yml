@@ -27,7 +27,7 @@ jobs:
     outputs:
       version: ${{ steps.ver.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # git describe (the firmware version) needs the tags
 
@@ -57,7 +57,7 @@ jobs:
       # symlink, which actions/cache archives as a 551-byte link rather than the binaries it points to.
       - name: Cache cargo tools
         id: tools
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/cargo-tools
           key: cargo-tools-${{ runner.os }}-espflash-ldproxy-v2
@@ -71,7 +71,7 @@ jobs:
 
       # ESP-IDF itself (cloned and built by esp-idf-sys): several GB, so cache it.
       - name: Cache ESP-IDF
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .embuild
           key: embuild-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'sdkconfig.defaults', '.cargo/config.toml', 'Cargo.lock') }}
@@ -124,7 +124,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: dist/*.bin
@@ -142,11 +142,11 @@ jobs:
     env:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # the tag message is the release summary
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: firmware
           path: dist
@@ -186,7 +186,7 @@ jobs:
             --title "Honu Watch ${VERSION}" --generate-notes \
             "firmware-${VERSION}.bin" "firmware-${VERSION}.factory.bin"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: gh-pages
           path: pages
