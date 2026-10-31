@@ -5,6 +5,7 @@ mod gravity;
 pub mod portal;
 mod swing;
 pub mod update;
+pub mod update_view;
 mod vec3;
 
 pub use gravity::GravityFilter;

@@ -6,6 +6,7 @@ mod provision;
 mod touch;
 mod ui;
 mod update_mode;
+mod update_ui;
 mod voice_index;
 
 use std::sync::atomic::AtomicU8;

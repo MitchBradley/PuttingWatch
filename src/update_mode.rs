@@ -11,12 +11,9 @@
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use embedded_graphics::pixelcolor::Rgb565;
-use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle, RoundedRectangle};
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::{AnyIOPin, AnyOutputPin, PinDriver, Pull};
@@ -27,16 +24,15 @@ use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 use esp_idf_svc::http::Method;
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs};
 use esp_idf_svc::ota::EspOta;
-use esp_idf_svc::sntp::{EspSntp, SyncStatus};
+use esp_idf_svc::sntp::EspSntp;
 use esp_idf_svc::wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi, WifiEvent};
 use putting_core::update::{battery_allows_update, decide, parse_manifest, Decision, Manifest, ManifestError};
+use putting_core::update_view::{Phase, Status};
 use sha2::{Digest, Sha256};
-use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
-use u8g2_fonts::{fonts, FontRenderer};
 
 use crate::co5300::Co5300;
-use crate::gfx::{self, Strip};
 use crate::provision;
+use crate::update_ui::{self, Hit, Shared};
 
 /// Where the watch looks for updates. Must match where the release workflow publishes.
 const SITE_URL: &str = match option_env!("OTA_SITE_URL") {
@@ -49,7 +45,6 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const JOIN_TIMEOUT: Duration = Duration::from_secs(20);
 const STALL_LIMIT: Duration = Duration::from_secs(15); // no download bytes for this long = stalled
 const TOUCH_RELEASE_MS: u32 = 120;
-const HIT_MARGIN: i32 = 24;
 
 // --- the RTC flag that selects update mode on the next boot --------------------------------------
 
@@ -76,84 +71,14 @@ pub fn requested() -> bool {
     }
 }
 
-// --- the (minimal, for now) status screen --------------------------------------------------------
+// --- commands from the screen's controls ----------------------------------------------------------
 
-/// What a button does.
+/// What an on-screen control asks the engine to do (the others just restart into the normal app).
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Cmd {
     Install,
     Retry,
     ChangeWifi,
-}
-
-#[derive(Clone, PartialEq, Default)]
-struct View {
-    title: String,
-    lines: Vec<String>,
-    /// One big button under the text, if any.
-    button: Option<(&'static str, Cmd)>,
-    /// A smaller text link below it, if any.
-    link: Option<(&'static str, Cmd)>,
-}
-
-/// (x, y, w, h) of the one button.
-const BUTTON: (i32, i32, i32, i32) = (55, 400, 300, 64);
-/// (x, y, w, h) of the link under it.
-const LINK: (i32, i32, i32, i32) = (85, 468, 240, 40);
-
-/// Greedy word wrap to `width` characters.
-fn wrap(s: &str, width: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    for para in s.split('\n') {
-        let mut line = String::new();
-        for word in para.split_whitespace() {
-            if !line.is_empty() && line.len() + 1 + word.len() > width {
-                out.push(core::mem::take(&mut line));
-            }
-            if !line.is_empty() {
-                line.push(' ');
-            }
-            line.push_str(word);
-        }
-        out.push(line);
-    }
-    out
-}
-
-fn draw_view(t: &mut Strip, v: &View) {
-    let _ = t.clear(Rgb565::BLACK);
-    let centred = |t: &mut Strip, font: &FontRenderer, s: &str, y: i32, c: Rgb565| {
-        let _ = font.render_aligned(s, Point::new(205, y), VerticalPosition::Center, HorizontalAlignment::Center, FontColor::Transparent(c), t);
-    };
-    centred(t, &FontRenderer::new::<fonts::u8g2_font_logisoso34_tf>(), &v.title, 70, Rgb565::WHITE);
-    let body = FontRenderer::new::<fonts::u8g2_font_helvR18_tf>();
-    for (i, l) in v.lines.iter().take(7).enumerate() {
-        centred(t, &body, l, 150 + 36 * i as i32, Rgb565::CSS_LIGHT_GRAY);
-    }
-    if let Some((label, _)) = v.link {
-        let (_, y, _, h) = LINK;
-        centred(t, &FontRenderer::new::<fonts::u8g2_font_helvR18_tf>(), label, y + h / 2, Rgb565::new(0x64 >> 3, 0xB5 >> 2, 0xF6 >> 3));
-    }
-    if let Some((label, _)) = v.button {
-        let (x, y, w, h) = BUTTON;
-        let _ = RoundedRectangle::with_equal_corners(Rectangle::new(Point::new(x, y), Size::new(w as u32, h as u32)), Size::new(18, 18))
-            .into_styled(PrimitiveStyle::with_fill(Rgb565::new(0x21 >> 3, 0x96 >> 2, 0xF3 >> 3)))
-            .draw(t);
-        centred(t, &FontRenderer::new::<fonts::u8g2_font_logisoso24_tf>(), label, y + h / 2, Rgb565::WHITE);
-    }
-}
-
-fn display_thread(lcd: Co5300, view: Arc<Mutex<View>>) {
-    let mut buf = vec![0u8; crate::co5300::WIDTH * gfx::STRIP_LINES * 2];
-    let mut drawn: Option<View> = None;
-    loop {
-        FreeRtos::delay_ms(100);
-        let cur = view.lock().unwrap().clone();
-        if drawn.as_ref() != Some(&cur) {
-            gfx::render(&lcd, &mut buf, |t| draw_view(t, &cur));
-            drawn = Some(cur);
-        }
-    }
 }
 
 // --- the engine ----------------------------------------------------------------------------------
@@ -164,19 +89,21 @@ struct Power {
     external: AtomicBool,
 }
 
-fn show(view: &Mutex<View>, title: &str, lines: Vec<String>, button: Option<(&'static str, Cmd)>) {
-    show_with_link(view, title, lines, button, None);
+fn set(shared: &Shared, f: impl FnOnce(&mut Status)) {
+    f(&mut shared.status.lock().unwrap());
 }
 
-fn show_with_link(view: &Mutex<View>, title: &str, lines: Vec<String>, button: Option<(&'static str, Cmd)>, link: Option<(&'static str, Cmd)>) {
-    log::info!("[update] {title}: {}", lines.join(" | "));
-    *view.lock().unwrap() = View { title: title.into(), lines, button, link };
+fn phase(shared: &Shared, p: Phase) {
+    log::info!("[update] phase {p:?}");
+    set(shared, |s| s.phase = p);
 }
 
-const CHANGE_WIFI: Option<(&str, Cmd)> = Some(("Change Wi-Fi", Cmd::ChangeWifi));
-
-fn fail(view: &Mutex<View>, msg: &str) {
-    show_with_link(view, "Problem", wrap(msg, 30), Some(("Try again", Cmd::Retry)), CHANGE_WIFI);
+fn fail(shared: &Shared, msg: &str) {
+    log::warn!("[update] error: {msg}");
+    set(shared, |s| {
+        s.phase = Phase::Error;
+        s.error = msg.to_string();
+    });
 }
 
 fn load_creds(nvs: &EspDefaultNvsPartition) -> Option<(String, String)> {
@@ -221,8 +148,13 @@ fn describe_join_failure(reason: u16, ssid: &str) -> String {
 
 /// Join a network: one attempt with a bounded wait, classifying the failure from the driver's
 /// disconnect reason (`why`, filled in by an event subscription).
-fn join(view: &Mutex<View>, wifi: &mut Wifi, why: &AtomicU16, ssid: &str, pass: &str) -> Result<(), String> {
-    show(view, "Wi-Fi", vec!["Joining".into(), ssid.to_string()], None);
+fn join(shared: &Shared, wifi: &mut Wifi, why: &AtomicU16, ssid: &str, pass: &str) -> Result<(), String> {
+    log::info!("[update] joining '{ssid}'");
+    set(shared, |s| {
+        s.phase = Phase::Connecting;
+        s.ssid = ssid.to_string();
+        s.error.clear();
+    });
     let cfg = Configuration::Client(ClientConfiguration {
         ssid: ssid.try_into().map_err(|_| "That network name is too long.".to_string())?,
         password: pass.try_into().map_err(|_| "That password is too long.".to_string())?,
@@ -260,18 +192,34 @@ fn join(view: &Mutex<View>, wifi: &mut Wifi, why: &AtomicU16, ssid: &str, pass: 
     Ok(())
 }
 
+/// Any real clock reads later than this (Nov 2023).
+const CLOCK_SANE: u64 = 1_700_000_000;
+
+fn clock_is_sane() -> bool {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) >= CLOCK_SANE
+}
+
 /// TLS needs a real clock to validate certificates.
+///
+/// Judged by the clock itself, never by the SNTP sync status: `sntp_get_sync_status()` reports
+/// Completed only once and then resets, so after a first successful check (or any later pass
+/// through here, e.g. after changing Wi-Fi) the status would never say Completed again even though
+/// the time is right.
 fn sync_clock(sntp: &mut Option<EspSntp<'static>>) -> Result<(), String> {
+    if clock_is_sane() {
+        return Ok(());
+    }
     if sntp.is_none() {
         *sntp = Some(EspSntp::new_default().map_err(|e| format!("SNTP failed: {e}"))?);
     }
     for _ in 0..75 {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        if sntp.as_ref().is_some_and(|s| s.get_sync_status() == SyncStatus::Completed) && now > 1_700_000_000 {
+        if clock_is_sane() {
             return Ok(());
         }
         FreeRtos::delay_ms(200);
     }
+    // Start over next time: the client may have been started before the network was usable.
+    *sntp = None;
     Err("Couldn't get the time from the internet. Is this Wi-Fi connected to the internet?".into())
 }
 
@@ -294,8 +242,8 @@ fn https_get(url: &str) -> Result<EspHttpConnection, String> {
 }
 
 /// Fetch and validate manifest.json, and decide what to do about it.
-fn check(view: &Mutex<View>) -> Result<(Decision, Manifest), String> {
-    show(view, "Checking", vec!["Looking for updates...".into()], None);
+fn check(shared: &Shared) -> Result<(Decision, Manifest), String> {
+    phase(shared, Phase::Checking);
     let url = format!("{SITE_URL}manifest.json");
     log::info!("[update] GET {url}");
     let mut conn = https_get(&url)?;
@@ -327,12 +275,14 @@ fn check(view: &Mutex<View>) -> Result<(Decision, Manifest), String> {
 
 /// Stream the image into the inactive OTA slot, verify, switch the boot slot and restart.
 /// Returns only on failure.
-fn download(view: &Mutex<View>, power: &Power, m: &Manifest) -> Result<(), String> {
+fn download(shared: &Shared, power: &Power, m: &Manifest) -> Result<(), String> {
     if !battery_allows_update(power.pct.load(Ordering::Relaxed), power.external.load(Ordering::Relaxed)) {
         return Err("The battery is too low to update safely. Plug in a charger and try again.".into());
     }
-    let label = format!("v{}", m.version);
-    show(view, "Downloading", vec![label.clone(), "0%".into()], None);
+    set(shared, |s| {
+        s.phase = Phase::Downloading;
+        s.progress_pct = 0;
+    });
     log::info!("[update] downloading {} ({} bytes)", m.url, m.size);
 
     let mut conn = https_get(&m.url)?;
@@ -362,11 +312,10 @@ fn download(view: &Mutex<View>, power: &Power, m: &Manifest) -> Result<(), Strin
                 sha.update(&buf[..n]);
                 written += n as u32;
                 last_data = Instant::now();
-                // Redraws compete with the download for the CPU, so report coarsely.
-                let pct = (written as u64 * 100 / m.size as u64) as u32 / 5 * 5;
+                let pct = (written as u64 * 100 / m.size as u64) as u32;
                 if pct != last_pct {
                     last_pct = pct;
-                    show(view, "Downloading", vec![label.clone(), format!("{pct}%")], None);
+                    set(shared, |s| s.progress_pct = pct as u8);
                 }
             }
             Err(e) if last_data.elapsed() > STALL_LIMIT => {
@@ -390,7 +339,7 @@ fn download(view: &Mutex<View>, power: &Power, m: &Manifest) -> Result<(), Strin
     // Checks the image's own header, then selects it for the next boot.
     update.complete().map_err(|e| format!("The update didn't install: {e}"))?;
 
-    show(view, "Installed", vec![label, "Restarting...".into()], None);
+    phase(shared, Phase::Installed);
     log::info!("[update] installed {} - restarting", m.version);
     FreeRtos::delay_ms(3000);
     unsafe { esp_idf_svc::sys::esp_restart() };
@@ -408,22 +357,6 @@ fn wait_for(rx: &Receiver<Cmd>, want: &[Cmd]) -> Cmd {
     }
 }
 
-/// The setup screen's text. `note` says why the previous attempt failed, if it did.
-fn show_provisioning(view: &Mutex<View>, st: provision::Status, note: &str) {
-    match st {
-        provision::Status::Scanning => show(view, "Wi-Fi", vec!["Looking for networks...".into()], None),
-        provision::Status::Waiting { ap_ssid, ap_pass, ip, phone_joined } => {
-            let mut lines = if note.is_empty() { vec![] } else { wrap(note, 30) };
-            if phone_joined {
-                lines.extend(["Now open this page".to_string(), format!("http://{ip}/"), "in your phone's browser".to_string()]);
-            } else {
-                lines.extend(["On your phone, join".to_string(), ap_ssid.to_string(), format!("password {ap_pass}")]);
-            }
-            show(view, "Wi-Fi setup", lines, None);
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 enum Next {
     Connect,
@@ -431,11 +364,22 @@ enum Next {
     Check,
 }
 
-fn engine(view: Arc<Mutex<View>>, power: Arc<Power>, rx: Receiver<Cmd>, modem: Modem<'static>, sysloop: EspSystemEventLoop, nvs: EspDefaultNvsPartition) {
+/// Where a "Try again" / "Change Wi-Fi" pair of controls leads.
+fn retry_or_change(rx: &Receiver<Cmd>, note: &mut String) -> Next {
+    match wait_for(rx, &[Cmd::Retry, Cmd::ChangeWifi]) {
+        Cmd::ChangeWifi => {
+            note.clear();
+            Next::Provision
+        }
+        _ => Next::Connect,
+    }
+}
+
+fn engine(shared: Arc<Shared>, power: Arc<Power>, rx: Receiver<Cmd>, modem: Modem<'static>, sysloop: EspSystemEventLoop, nvs: EspDefaultNvsPartition) {
     // No NVS handed to the driver: it would keep its own copy of the credentials.
     let esp = match EspWifi::new(modem, sysloop.clone(), None) {
         Ok(e) => e,
-        Err(e) => return fail(&view, &format!("Wi-Fi init failed: {e}")),
+        Err(e) => return fail(&shared, &format!("Wi-Fi init failed: {e}")),
     };
     // The driver's disconnect reasons tell "wrong password" from "no such network".
     let why = Arc::new(AtomicU16::new(0));
@@ -449,7 +393,7 @@ fn engine(view: Arc<Mutex<View>>, power: Arc<Power>, rx: Receiver<Cmd>, modem: M
     };
     let mut wifi = match BlockingWifi::wrap(esp, sysloop) {
         Ok(w) => w,
-        Err(e) => return fail(&view, &format!("Wi-Fi init failed: {e}")),
+        Err(e) => return fail(&shared, &format!("Wi-Fi init failed: {e}")),
     };
     let mut sntp: Option<EspSntp<'static>> = None;
     let mut note = String::new(); // why the last join failed, shown on the setup screen
@@ -462,7 +406,7 @@ fn engine(view: Arc<Mutex<View>>, power: Arc<Power>, rx: Receiver<Cmd>, modem: M
                     note.clear();
                     Next::Provision
                 }
-                Some((ssid, pass)) => match join(&view, &mut wifi, &why, &ssid, &pass) {
+                Some((ssid, pass)) => match join(&shared, &mut wifi, &why, &ssid, &pass) {
                     Ok(()) => Next::Check,
                     Err(e) => {
                         note = e;
@@ -471,62 +415,69 @@ fn engine(view: Arc<Mutex<View>>, power: Arc<Power>, rx: Receiver<Cmd>, modem: M
                 },
             },
 
-            Next::Provision => match provision::run(&mut wifi, |st| show_provisioning(&view, st, &note)) {
-                Ok((ssid, pass)) => match join(&view, &mut wifi, &why, &ssid, &pass) {
-                    Ok(()) => {
-                        save_creds(&nvs, &ssid, &pass);
-                        note.clear();
-                        Next::Check
-                    }
+            Next::Provision => {
+                let result = provision::run(&mut wifi, |st| match st {
+                    provision::Status::Scanning => phase(&shared, Phase::Scanning),
+                    provision::Status::Waiting { ap_ssid, ap_pass, ip, phone_joined } => set(&shared, |s| {
+                        s.phase = Phase::Provisioning;
+                        s.ap_ssid = ap_ssid.to_string();
+                        s.ap_pass = ap_pass.to_string();
+                        s.ap_ip = ip.to_string();
+                        s.portal_client = phone_joined;
+                        s.error = note.clone();
+                    }),
+                });
+                match result {
+                    Ok((ssid, pass)) => match join(&shared, &mut wifi, &why, &ssid, &pass) {
+                        Ok(()) => {
+                            save_creds(&nvs, &ssid, &pass);
+                            note.clear();
+                            Next::Check
+                        }
+                        Err(e) => {
+                            note = e; // back to a fresh setup screen, with the reason shown
+                            Next::Provision
+                        }
+                    },
                     Err(e) => {
-                        note = e; // back to a fresh setup screen, with the reason shown
-                        Next::Provision
-                    }
-                },
-                Err(e) => {
-                    fail(&view, &e);
-                    match wait_for(&rx, &[Cmd::Retry, Cmd::ChangeWifi]) {
-                        Cmd::ChangeWifi => Next::Provision,
-                        _ => Next::Connect,
+                        fail(&shared, &e);
+                        retry_or_change(&rx, &mut note)
                     }
                 }
-            },
+            }
 
             Next::Check => {
-                show(&view, "Checking", vec!["Setting the clock...".into()], None);
-                match sync_clock(&mut sntp).and_then(|_| check(&view)) {
+                phase(&shared, Phase::Checking);
+                match sync_clock(&mut sntp).and_then(|_| check(&shared)) {
                     Ok((Decision::UpToDate, _)) => {
-                        show_with_link(&view, "Up to date", vec![format!("v{RUNNING_VERSION}")], Some(("Check again", Cmd::Retry)), CHANGE_WIFI);
-                        match wait_for(&rx, &[Cmd::Retry, Cmd::ChangeWifi]) {
-                            Cmd::ChangeWifi => {
-                                note.clear();
-                                Next::Provision
-                            }
-                            _ => Next::Connect,
-                        }
+                        phase(&shared, Phase::UpToDate);
+                        // "Done" restarts into the normal app; only Change Wi-Fi comes back here.
+                        wait_for(&rx, &[Cmd::ChangeWifi]);
+                        note.clear();
+                        Next::Provision
                     }
-                    Ok((Decision::NeedsUsbInstall, _)) => {
-                        show_with_link(&view, "USB update", wrap("A newer version needs a USB cable to install.", 30), None, CHANGE_WIFI);
+                    Ok((Decision::NeedsUsbInstall, m)) => {
+                        set(&shared, |s| {
+                            s.phase = Phase::NeedsUsbInstall;
+                            s.version = m.version.clone();
+                            s.notes = m.notes.clone();
+                        });
                         wait_for(&rx, &[Cmd::ChangeWifi]);
                         note.clear();
                         Next::Provision
                     }
                     Ok((Decision::Available, m)) => {
-                        let mut lines = vec![format!("v{} is available", m.version)];
-                        lines.extend(wrap(&m.notes, 30));
-                        show_with_link(&view, "Update", lines, Some(("Install", Cmd::Install)), CHANGE_WIFI);
+                        set(&shared, |s| {
+                            s.phase = Phase::Available;
+                            s.version = m.version.clone();
+                            s.notes = m.notes.clone();
+                        });
                         match wait_for(&rx, &[Cmd::Install, Cmd::ChangeWifi]) {
-                            Cmd::Install => match download(&view, &power, &m) {
+                            Cmd::Install => match download(&shared, &power, &m) {
                                 Ok(()) => Next::Check,
                                 Err(e) => {
-                                    fail(&view, &e);
-                                    match wait_for(&rx, &[Cmd::Retry, Cmd::ChangeWifi]) {
-                                        Cmd::ChangeWifi => {
-                                            note.clear();
-                                            Next::Provision
-                                        }
-                                        _ => Next::Connect,
-                                    }
+                                    fail(&shared, &e);
+                                    retry_or_change(&rx, &mut note)
                                 }
                             },
                             _ => {
@@ -536,14 +487,8 @@ fn engine(view: Arc<Mutex<View>>, power: Arc<Power>, rx: Receiver<Cmd>, modem: M
                         }
                     }
                     Err(e) => {
-                        fail(&view, &e);
-                        match wait_for(&rx, &[Cmd::Retry, Cmd::ChangeWifi]) {
-                            Cmd::ChangeWifi => {
-                                note.clear();
-                                Next::Provision
-                            }
-                            _ => Next::Connect,
-                        }
+                        fail(&shared, &e);
+                        retry_or_change(&rx, &mut note)
                     }
                 }
             }
@@ -551,7 +496,17 @@ fn engine(view: Arc<Mutex<View>>, power: Arc<Power>, rx: Receiver<Cmd>, modem: M
     }
 }
 
-/// Run update mode. Never returns: BOOT restarts into the normal app.
+/// Restart into the normal app (the update flag is already cleared, so the next boot is normal).
+fn restart_to_normal() -> ! {
+    FreeRtos::delay_ms(50);
+    unsafe { esp_idf_svc::sys::esp_restart() }
+}
+
+/// Left alone on a result screen this long: go back to the normal app instead of sitting there
+/// with the screen and the radio on.
+const IDLE_RESTART: Duration = Duration::from_secs(5 * 60);
+
+/// Run update mode. Never returns: leaving it restarts into the normal app.
 pub fn run(
     lcd: Co5300,
     mut i2c: I2cDriver<'static>,
@@ -561,13 +516,18 @@ pub fn run(
     touch_int: AnyIOPin<'static>,
 ) -> ! {
     log::info!("UPDATE MODE (site {SITE_URL}, running {RUNNING_VERSION})");
-    let view = Arc::new(Mutex::new(View { title: "Update".into(), lines: vec!["Starting...".into()], button: None, link: None }));
+    let shared = Shared::new();
+    shared.status.lock().unwrap().phase = Phase::Starting;
 
-    // A redraw takes ~100+ ms of CPU; keep it below the engine so it can't slow the download.
+    // A repaint is tens of ms of CPU; keep the display thread below the engine so it can't slow the
+    // download.
     let _ = ThreadSpawnConfiguration { name: Some(c"display"), stack_size: 16 * 1024, priority: 2, ..Default::default() }.set();
     {
-        let view = view.clone();
-        std::thread::Builder::new().stack_size(16 * 1024).spawn(move || display_thread(lcd, view)).unwrap();
+        let shared = shared.clone();
+        std::thread::Builder::new()
+            .stack_size(16 * 1024)
+            .spawn(move || update_ui::display_thread(lcd, shared, RUNNING_VERSION, SITE_URL))
+            .unwrap();
     }
     let _ = ThreadSpawnConfiguration::default().set();
 
@@ -576,11 +536,11 @@ pub fn run(
     let sysloop = EspSystemEventLoop::take().expect("event loop");
     let nvs = EspDefaultNvsPartition::take().expect("nvs");
     {
-        let (view, power) = (view.clone(), power.clone());
+        let (shared, power) = (shared.clone(), power.clone());
         // 24 KB: the TLS handshake runs on this thread's stack and is the deepest thing it does.
         std::thread::Builder::new()
             .stack_size(24 * 1024)
-            .spawn(move || engine(view, power, rx, modem, sysloop, nvs))
+            .spawn(move || engine(shared, power, rx, modem, sysloop, nvs))
             .unwrap();
     }
 
@@ -590,47 +550,70 @@ pub fn run(
     let boot = PinDriver::input(boot, Pull::Up).unwrap();
     let mut boot_was_low = boot.is_low();
     let (mut touching, mut last_touch) = (false, Instant::now());
+    let mut last_activity = Instant::now();
     let mut next_battery = Instant::now();
     let mut batt_mv_ema = 0i32;
     loop {
-        // BOOT cancels: restart into the normal app (the update flag is already cleared).
+        // BOOT cancels, anywhere: restarting is always safe.
         let low = boot.is_low();
         if low && !boot_was_low {
             log::info!("BOOT pressed: leaving update mode");
-            unsafe { esp_idf_svc::sys::esp_restart() };
+            restart_to_normal();
         }
         boot_was_low = low;
 
         if let Some((x, y)) = touch.read(&mut i2c) {
             last_touch = Instant::now();
+            last_activity = last_touch;
             if !touching {
                 touching = true;
-                let (button, link) = {
-                    let v = view.lock().unwrap();
-                    (v.button, v.link)
-                };
-                let (x, y) = (x as i32, y as i32);
-                let hits = |(bx, by, bw, bh): (i32, i32, i32, i32)| {
-                    x >= bx - HIT_MARGIN && x < bx + bw + HIT_MARGIN && y >= by - HIT_MARGIN && y < by + bh + HIT_MARGIN
-                };
-                if let Some((_, cmd)) = button.filter(|_| hits(BUTTON)) {
-                    let _ = tx.send(cmd);
-                } else if let Some((_, cmd)) = link.filter(|_| hits(LINK)) {
-                    let _ = tx.send(cmd);
+                let view = update_ui::current_view(&shared, RUNNING_VERSION, SITE_URL);
+                let phase = shared.status.lock().unwrap().phase;
+                if let Some(h) = update_ui::hit(&view, x as i32, y as i32) {
+                    shared.set_pressed(Some(h));
+                    match (h, phase) {
+                        (Hit::Primary, Phase::Available) => {
+                            let _ = tx.send(Cmd::Install);
+                        }
+                        (Hit::Primary, Phase::Error) => {
+                            let _ = tx.send(Cmd::Retry);
+                        }
+                        (Hit::Link, _) => {
+                            let _ = tx.send(Cmd::ChangeWifi);
+                        }
+                        // Done, Cancel, Not now, Close: back to the normal app. Let the pressed look reach the screen.
+                        (Hit::Primary, _) | (Hit::Secondary, _) => {
+                            FreeRtos::delay_ms(150);
+                            restart_to_normal();
+                        }
+                    }
                 }
             }
         }
         if touching && last_touch.elapsed() > Duration::from_millis(TOUCH_RELEASE_MS as u64) {
             touching = false;
+            shared.set_pressed(None);
         }
 
         if Instant::now() >= next_battery {
-            next_battery = Instant::now() + Duration::from_secs(5);
+            next_battery = Instant::now() + Duration::from_secs(2);
             if let Some(mv) = crate::pmu::millivolts(&mut i2c) {
                 batt_mv_ema = if batt_mv_ema == 0 { mv } else { batt_mv_ema + (mv - batt_mv_ema) / 3 };
                 power.pct.store(crate::pmu::percent_for_millivolts(batt_mv_ema), Ordering::Relaxed);
             }
             power.external.store(crate::pmu::external_power(&mut i2c), Ordering::Relaxed);
+            shared.battery_ok.store(
+                battery_allows_update(power.pct.load(Ordering::Relaxed), power.external.load(Ordering::Relaxed)),
+                Ordering::Relaxed,
+            );
+        }
+
+        let phase = shared.status.lock().unwrap().phase;
+        if matches!(phase, Phase::UpToDate | Phase::Available | Phase::NeedsUsbInstall | Phase::Error)
+            && last_activity.elapsed() > IDLE_RESTART
+        {
+            log::info!("idle on a result screen: leaving update mode");
+            restart_to_normal();
         }
         FreeRtos::delay_ms(20);
     }
