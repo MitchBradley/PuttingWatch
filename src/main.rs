@@ -40,6 +40,26 @@ const QR_TIMEOUT_MS: u32 = 60_000; // back to Bye if nobody dismisses a QR page
 const TP_INT_GPIO: i32 = 15;
 const BOOT_GPIO: i32 = 9;
 
+/// CPU clock. The run screen's workload (100 Hz sampling and filtering, partial repaints, on-demand
+/// audio) doesn't need 160 MHz, and 80 MHz keeps the same 80 MHz APB clock, so I2C, I2S, SPI and the
+/// timers are unaffected. Everything else (boot, calibration, the image-heavy waiting screen, update
+/// mode's TLS and downloads) runs at full speed. Same split as the C++ app.
+const CPU_MHZ_FULL: i32 = 160;
+const CPU_MHZ_RUN: i32 = 80;
+
+/// Pin the CPU at `mhz` (min == max: a fixed frequency, no scaling, no light sleep).
+fn set_cpu_mhz(mhz: i32) {
+    use esp_idf_svc::sys::*;
+    let cfg = esp_pm_config_t { max_freq_mhz: mhz, min_freq_mhz: mhz, light_sleep_enable: false };
+    let err = unsafe { esp_pm_configure((&cfg as *const esp_pm_config_t).cast()) };
+    let actual = unsafe { esp_rom_get_cpu_ticks_per_us() };
+    if err == ESP_OK {
+        log::info!("cpu -> {mhz} MHz (now running at {actual} MHz)");
+    } else {
+        log::error!("cpu -> {mhz} MHz failed: esp_err_t {err} (running at {actual} MHz)");
+    }
+}
+
 /// Click sensitivity levels: level 1 = 3.0 deg, +0.9 deg per level, 16 levels (as in the C++ app).
 const LEVEL_BASE_DEGREES: f32 = 3.0;
 const LEVEL_STEP_DEGREES: f32 = 0.9;
@@ -179,6 +199,7 @@ fn main() {
 
     let (mut touching, mut last_touch_ms, mut pressed) = (false, 0u32, None::<Btn>);
     let (mut batt_mv_ema, mut batt_pct, mut batt_next_ms) = (0i32, -1i32, 0u32);
+    let mut cpu_mhz = CPU_MHZ_FULL; // the boot default (CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ)
 
     // Signed "has `t` passed" for wrapping millisecond timestamps.
     let passed = |now: u32, t: u32| (now.wrapping_sub(t) as i32) >= 0;
@@ -393,6 +414,13 @@ fn main() {
             && now.wrapping_sub(last_angle_wake_ms) >= ANGLE_WAKE_HOLD_MS
         {
             panel = Panel::Blanked;
+        }
+
+        // 80 MHz on the run screen, full speed otherwise.
+        let want_mhz = if screen == Screen::Run { CPU_MHZ_RUN } else { CPU_MHZ_FULL };
+        if want_mhz != cpu_mhz {
+            set_cpu_mhz(want_mhz);
+            cpu_mhz = want_mhz;
         }
 
         // The speaker amp only needs power while sounds can play.

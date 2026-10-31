@@ -11,6 +11,10 @@ CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=4096
 # `std::thread::Builder::new().stack_size(XXX)` for spawning
 CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=4096
 
+# Power management API: lets main.rs run the CPU at 80 MHz on the run screen (esp_pm_configure with
+# min == max, i.e. a fixed frequency; no automatic scaling and no light sleep).
+CONFIG_PM_ENABLE=y
+
 # --- Match the C++ firmware's flash layout and bootloader contract -------------------------------
 # Devices in the field run the C++ build's bootloader and partition table; neither can be changed
 # over the air, so a Rust image must be loadable (and OTA-updatable) under them.
